@@ -29,6 +29,13 @@ def vops(path):
         raise ValueError('No MPEG-4 VOPs')
     return data[:offsets[0]], [data[a:b] for a, b in zip(offsets, offsets[1:] + [len(data)])]
 
+def normalize(source, destination):
+    """Shared, unchanged Phase 1 normalization; never edit the source."""
+    run('ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', source, '-t', '6', '-an',
+        '-vf', 'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
+        '-c:v', 'mpeg4', '-threads', '2', '-q:v', '4', '-g', '10000', '-bf', '0', '-sc_threshold', '0',
+        '-pix_fmt', 'yuv420p', '-f', 'm4v', destination)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--a', type=Path, default=ROOT / 'samples/clip-a.mp4')
@@ -47,10 +54,7 @@ def main():
     before = {str(p): digest(p) for p in (args.a, args.b)}
     sources = {str(p): probe(p) for p in (args.a, args.b)}
     for label, source in [('a', args.a), ('b', args.b)]:
-        run('ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', source, '-t', '6', '-an',
-            '-vf', 'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
-            '-c:v', 'mpeg4', '-threads', '2', '-q:v', '4', '-g', '10000', '-bf', '0', '-sc_threshold', '0',
-            '-pix_fmt', 'yuv420p', '-f', 'm4v', work / f'{label}.m4v')
+        normalize(source, work / f'{label}.m4v')
     header, a = vops(work / 'a.m4v')
     _, b = vops(work / 'b.m4v')
     types = lambda packets: [p[4] >> 6 for p in packets]

@@ -1,4 +1,7 @@
-# H4 MOSH LAB — Phase 1 engine proof
+# H4 MOSH LAB — codec-level engine
+
+Phase 2 adds a verified Frame Melt mode and a common local API while preserving
+Classic Mosh. See [Phase 2 methods, tests, API and Motion Transfer blocker](PHASE2.md).
 
 ## Watch the real-footage proof
 
