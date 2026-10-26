@@ -1,4 +1,19 @@
-# H4 MOSH LAB — codec-level engine
+# H4 MOSH LAB
+
+## Minimal local editor
+
+Import multiple clips, reorder, set real Classic Mosh / Frame Melt transitions,
+assemble and scrub a verified preview, and download the same MP4.
+
+[Run the editor on your Mac, workflow, limitations and tests](EDITOR.md)
+
+![Minimal editor](demo/editor/desktop.png)
+
+```sh
+python3 tools/server.py --port 8765
+```
+
+No frontend build or extra runtime dependencies. The simple styling can be refined later.
 
 Phase 2 adds a verified Frame Melt mode and a common local API while preserving
 Classic Mosh. See [Phase 2 methods, tests, API and Motion Transfer blocker](PHASE2.md).

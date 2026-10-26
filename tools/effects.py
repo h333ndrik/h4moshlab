@@ -14,6 +14,15 @@ EFFECTS = {
                    'method': 'Remove B I-VOP; repeat compressed B P-VOPs against evolving references.'},
 }
 
+def prediction_tail(packets, effect, count, repeat=4):
+    """Shared compressed-domain operation used by CLI and sequence renderer."""
+    if effect not in EFFECTS:
+        raise ValueError('Unsupported effect')
+    repeat = repeat if effect == 'frame-melt' else 1
+    indices = [1 + i//repeat for i in range(count)]
+    return indices, [packets[i] for i in indices]
+
+
 def process(effect, a, b, transition_duration, output, parameters=None):
     """Render <=6s of A followed by exactly duration*24 prediction frames.
 
@@ -49,8 +58,7 @@ def process(effect, a, b, transition_duration, output, parameters=None):
     # Equal output duration across effects. Melt progresses more slowly through B.
     if count > len(bv)-1:
         raise ValueError(f'Transition too long for B: maximum {(len(bv)-1)/24:.6f}s')
-    indices = [1 + i//repeat for i in range(count)]
-    tail = [bv[i] for i in indices]
+    indices, tail = prediction_tail(bv, effect, count, repeat)
     stream = evidence / 'effect.m4v'
     stream.write_bytes(header + b''.join(av + tail))
     # Full manipulated-stream decode is also checked, before delivery encoding.
