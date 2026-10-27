@@ -40,6 +40,13 @@ created from the user's authorized scope. Blueprint 1 remains unchanged.
 - Blueprint 1 tag before publication verified locally/remotely:
   06d276234ee64dcfa537a44549aba44d23266488 (annotated tag identity).
 
-Remaining final action: commit/push source/docs/reference images and verify remote
-state without moving the tag. Do not rerun verified work unless code changes or a
-new failure warrants it. Physical Mac/iPhone testing is not claimed.
+## Publication completed
+
+Feature commit 89bb032 was pushed to editor-workflow and the remote branch was
+verified at 89bb032dddf160afa0c2492357dfd7fe6b85fe55. Blueprint 1 remains at the
+same annotated tag identity 06d276234ee64dcfa537a44549aba44d23266488 locally and
+remotely. The working tree was clean after publication. This final documentation
+update changes no application code. All authorized plan items are complete.
+
+Do not repeat verified work without a new change/failure. Physical Mac/iPhone
+testing is not claimed; next step is user review, not another automatic phase.

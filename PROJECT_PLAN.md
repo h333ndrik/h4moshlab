@@ -9,7 +9,7 @@ simplest practical UX. Preserve light layout, one export button and 640x480.
 - [x] Manual BPM for Motion Loop/Stutter/Reset Pulse, rounded per beat at 24fps.
 - [x] User-added per-video Original/B&W/B&W-negative/Color-negative looks.
 - [x] Integration/browser checks, documentation and visual/touch review.
-- [ ] Commit/publish editor-workflow; verify remote and unchanged Blueprint tag.
+- [x] Commit/publish editor-workflow; verify remote and unchanged Blueprint tag.
 
 Project files store edit decisions, not original videos. Removed media is retained
 only temporarily for undo. No automatic beat detection, native app, public hosting,
