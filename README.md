@@ -10,6 +10,8 @@ remains selectable.
 
 [Run the editor on your Mac, workflow, limitations and tests](EDITOR.md)
 
+[Use it on your phone over the same Wi-Fi](MOBILE_WEB.md)
+
 [New: Motion Loop, motion selection and three-mode comparison](MOTION_LOOP.md)
 
 ![Minimal editor](demo/editor/desktop.png)
@@ -147,3 +149,5 @@ commands above; do not use Python's `-O` flag, which disables assertions.
 
 Next phase, only after reviewing the render: call this CLI from one local server
 endpoint that accepts two uploaded file paths and returns the rendered MP4.
+
+[Loop Release: codec-level loop exit and reproducible comparison](LOOP_RELEASE.md)

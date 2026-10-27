@@ -12,6 +12,8 @@ EFFECTS = {
     'classic-mosh': {'parameters': {'motion_start': {'default': 0}}, 'method': 'Remove B I-VOP; append B P-VOPs unchanged.'},
     'frame-melt': {'parameters': {'motion_start': {'default': 0}, 'repeat': {'default': 4, 'min': 2, 'max': 12}},
                    'method': 'Remove B I-VOP; repeat compressed B P-VOPs against evolving references.'},
+    'loop-release': {'parameters': {'motion_start': {'default': 0}, 'loop_frames': {'default': 12, 'min': 2, 'max': 48}},
+                     'method': 'Repeat motion groups three then two times; finish with timeline-aligned consecutive P-VOPs, without a reference reset.'},
     'motion-loop': {'parameters': {'motion_start': {'default': 0}, 'loop_frames': {'default': 12, 'min': 2, 'max': 48}},
                     'method': 'Replay a selected group of compressed B P-VOPs against evolving references.'},
 }
@@ -33,13 +35,15 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
     available = frame_count-1-offset
     if available < 1:
         raise ValueError('Motion start is outside the incoming clip.')
+    if effect == 'loop-release' and (offset != 0 or count < 12):
+        raise ValueError('Loop Release needs at least 0.5 seconds and motion_start=0 for a timeline-aligned exit.')
     config = {'motion_start': offset/24}
     if effect == 'frame-melt':
         if type(repeat) is not int or not 2 <= repeat <= 12:
             raise ValueError('repeat must be an integer from 2 through 12')
         positions = [i//repeat for i in range(count)]
         config['repeat'] = repeat
-    elif effect == 'motion-loop':
+    elif effect in ('motion-loop', 'loop-release'):
         if loop_frames is None:
             loop_frames = min(12, available, count-1)
         if type(loop_frames) is not int or not 2 <= loop_frames <= 48 or loop_frames >= count:
@@ -47,6 +51,18 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         if loop_frames > available:
             raise ValueError('The selected motion loop extends beyond the incoming clip.')
         positions = [i % loop_frames for i in range(count)]
+        if effect == 'loop-release':
+            # Keep at least half the transition for uninterrupted normal motion.
+            # Repeated blocks start at their output-timeline position; this skips
+            # donor motion at block boundaries, but rejoins the tail exactly.
+            positions = []
+            for repetitions in (3, 2):
+                length = min(loop_frames, (count // 2 - len(positions)) // repetitions)
+                if length < 2:
+                    continue
+                start = len(positions)
+                positions.extend(list(range(start, start + length)) * repetitions)
+            positions.extend(range(len(positions), count))
         config['loop_frames'] = loop_frames
     else:
         positions = list(range(count))

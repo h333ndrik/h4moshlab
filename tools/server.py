@@ -11,10 +11,11 @@ import shutil
 import tempfile
 import traceback
 import threading
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 import uuid
 
 from sequence import prepare, render
+import lan
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_UPLOAD = 128*1024*1024
@@ -28,8 +29,10 @@ def processing_error(exc):
 
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, lan_address=None):
         self.root = Path(root)
+        self.lan_address = lan_address
+        self.lan_key = lan.access_key() if lan_address else None
         self.clips = {}
         self.jobs = {}
         self.lock = threading.Lock()
@@ -73,12 +76,16 @@ def handler_for(app):
         def allowed(self):
             host = self.headers.get('Host', '')
             valid = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
+            if app.lan_address:
+                valid.add(f'{app.lan_address}:{self.server.server_port}')
             origin = self.headers.get('Origin')
             return host in valid and (not origin or origin in {f'http://{h}' for h in valid})
 
         def do_POST(self):
             if not self.allowed():
                 return self.send_json(403, {'error': 'Local same-origin requests only.'})
+            if not lan.authorized(self.headers, self.client_address, app.lan_key):
+                return self.send_json(401, {'error': 'Open the phone link from the Mac first.'})
             if not app.busy.acquire(blocking=False):
                 return self.send_json(409, {'error': 'Processing is already running.'})
             owned = True
@@ -141,6 +148,8 @@ def handler_for(app):
         def do_DELETE(self):
             if not self.allowed():
                 return self.send_json(403, {'error': 'Local same-origin requests only.'})
+            if not lan.authorized(self.headers, self.client_address, app.lan_key):
+                return self.send_json(401, {'error': 'Open the phone link from the Mac first.'})
             if not app.busy.acquire(blocking=False):
                 return self.send_json(409, {'error': 'Wait until processing finishes.'})
             try:
@@ -157,7 +166,25 @@ def handler_for(app):
         def do_GET(self):
             if not self.allowed():
                 return self.send_json(403, {'error': 'Local requests only.'})
-            path = urlsplit(self.path).path
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            pairing = parse_qs(parsed.query).get('pair', [])
+            if path == '/' and pairing:
+                if len(pairing) != 1 or not lan.matches(pairing[0], app.lan_key):
+                    return self.send_json(401, {'error': 'This phone link is invalid or expired. Copy the current link from the Mac.'})
+                self.send_response(303)
+                self.send_header('Set-Cookie', lan.cookie(app.lan_key))
+                self.send_header('Location', '/')
+                self.send_header('Referrer-Policy', 'no-referrer')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
+            if not lan.authorized(self.headers, self.client_address, app.lan_key):
+                return self.send_json(401, {'error': 'Open the phone link from the Mac first.'})
+            if path == '/api/connection':
+                url = f'http://{app.lan_address}:{self.server.server_port}/?pair={app.lan_key}' if app.lan_address and lan.loopback(self.client_address) else None
+                return self.send_json(200, {'phone_url': url})
             if path == '/api/clips':
                 with app.lock:
                     clips = [{k:c[k] for k in ('id', 'name', 'frames', 'duration')} |
@@ -181,7 +208,7 @@ def handler_for(app):
                         file = app.root/identifier/'sequence.mp4'
                 if file:
                     return self.send_file(file, download='download' in urlsplit(self.path).query)
-            static = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}
+            static = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/cursor.js': 'cursor.js', '/h4-cursor.svg': 'h4-cursor.svg'}
             if path in static:
                 return self.send_file(ROOT/'web'/static[path])
             self.send_json(404, {'error': 'Not found.'})
@@ -238,15 +265,25 @@ def handler_for(app):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--lan', action='store_true', help='Allow paired phones on the same trusted Wi-Fi')
+    parser.add_argument('--lan-address', help='Optional private Mac IPv4 if automatic Wi-Fi detection chooses another interface')
     args = parser.parse_args()
+    if args.lan_address and not args.lan:
+        parser.error('--lan-address requires --lan')
+    address = (args.lan_address or lan.discover_address()) if args.lan else None
+    if args.lan and (not address or not lan.private_address(address)):
+        parser.error('No private Wi-Fi IPv4 found. Join your Wi-Fi or provide --lan-address with the Mac private IPv4.')
     missing = [name for name in ('ffmpeg', 'ffprobe') if not shutil.which(name)]
     if missing:
         parser.exit(2, 'Missing: ' + ', '.join(missing) + '. On a Mac run: brew install ffmpeg (includes ffprobe), then restart this server from that terminal.\n')
     (ROOT/'work').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='editor-', dir=ROOT/'work') as directory:
-        app = App(directory)
-        server = ThreadingHTTPServer(('127.0.0.1', args.port), handler_for(app))
+        app = App(directory, address)
+        server = ThreadingHTTPServer(('0.0.0.0' if args.lan else '127.0.0.1', args.port), handler_for(app))
         print(f'Local editor listening on port {args.port}; Ctrl+C to stop. Session files are temporary.', flush=True)
+        if address:
+            print(f'Phone link (same Wi-Fi): http://{address}:{args.port}/?pair={app.lan_key}', flush=True)
+            print('Use the complete link once to pair the phone. It expires when this server stops.', flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

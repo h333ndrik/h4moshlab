@@ -3,7 +3,7 @@
 ## Future design work: branded H4 cursor
 
 When planning the next UI/design refinement, proactively remind the user of this
-requested feature. Keep it deferred until that design work is requested.
+requested feature. The user has now requested implementation and supplied the original artwork.
 
 - Use the branded H4 mouse cursor.
 - At rest, rotate it approximately 15 degrees to the left (-15deg).
@@ -36,5 +36,26 @@ demo/editor/desktop.png is the accompanying visual reference.
 - Keep "Assemble preview" and "Export MP4" as the main actions. Do not restore the
   duplicate "Download assembled MP4" link or add separate full-sequence/clip tabs.
 - Preserve the existing responsive spacing and horizontally scrolling timeline.
-- The custom H4 cursor above remains a future enhancement, not part of the current
-  implemented layout. Proactively mention it when the next design pass is planned.
+- The original H4 cursor is implemented separately in web/cursor.js and
+  web/h4-cursor.svg; preserve its small monochrome form and smooth -15/+15 rotation.
+
+## Platform direction
+
+The user prefers a mobile web version rather than a native iOS/App Store app.
+Preserve the approved visual layout while improving touch/browser usability.
+Do not start native iOS development or App Store enrollment without a new request.
+
+Start with iPhone access on the same Wi-Fi as the Mac. An Internet-hosted link
+without a running Mac is a long-term goal, not the current deployment scope.
+
+## Current priority and cursor refinement
+
+Prioritize effect improvements and new video-only codec effects before mobile work.
+After effect work, implement the original h4ngelic cursor if its asset is available:
+black and white, slightly smaller, resting at -15 degrees, smoothly rotating to
++15 degrees over enabled clickable controls. Other chat history is unavailable;
+ask for the original asset if it cannot be found instead of inventing its shape.
+
+Cursor artwork extracted from the user-supplied h4ngelic-preview (5).html.
+Use a 22x33px display size, black fill/white outline. Native pointer remains on
+touch devices and video controls; honor reduced-motion preferences.

@@ -2,9 +2,10 @@
 const $ = id => document.getElementById(id);
 const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
-const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'motion-loop': 'Motion Loop'};
-const notes = {'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
+const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
+const notes = {'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
+const touchUI = () => window.matchMedia('(pointer:coarse)').matches;
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message) { $('status').textContent = message; }
 function source(url, label) {
@@ -45,12 +46,12 @@ function draw() {
       const conf = setting(index - 1);
       const connector = button('', () => openTransition(index - 1), `Transition ${index}: ${names[conf.effect]}`);
       const method = document.createElement('span');
-      method.textContent = conf.effect === 'cut' ? 'Cut' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
+      method.textContent = conf.effect === 'cut' ? 'Cut' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'loop-release' ? 'Release' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
       const time = document.createElement('span'); time.textContent = conf.effect === 'cut' ? '—' : `${conf.duration.toFixed(2)} s`;
       connector.className = 'connector'; connector.append(method, time); timeline.append(connector);
     }
     const card = document.createElement('div'); card.className = `clip${state.active === clip.id ? ' active' : ''}`;
-    card.draggable = !state.busy;
+    card.draggable = !state.busy && !touchUI();
     card.ondragstart = event => { if (state.busy) return event.preventDefault(); event.dataTransfer.setData('text/plain', clip.id); };
     card.ondragover = event => event.preventDefault();
     card.ondrop = event => { event.preventDefault(); move(event.dataTransfer.getData('text/plain'), index); };
@@ -66,6 +67,7 @@ function draw() {
     const duration = document.createElement('small'); duration.textContent = `${clip.duration.toFixed(2)}s`;
     actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); timeline.append(card);
   });
+  document.querySelector('.sequence > .hint').textContent = touchUI() ? 'Swipe to browse clips. Use the arrows to reorder. Tap a connector to set a transition.' : 'Drag clips to reorder, or use the arrows. Select the connector between clips to set a transition.';
   controls();
 }
 function move(id, to) {
@@ -116,20 +118,20 @@ $('files').onchange = async event => {
 };
 function clampMotion(index) {
   const conf = setting(index), available = state.clips[index + 1].frames - 1;
-  const minimum = conf.effect === 'motion-loop' ? 3 : 1;
+  const minimum = conf.effect === 'loop-release' ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
   const count = Math.max(minimum, Math.min(144, available, Math.round(conf.duration * 24)));
   conf.duration = count / 24;
   conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
   conf.loop_frames = Math.max(2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
-  const needed = conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
-  const maximum = Math.max(0, available - needed);
+  const needed = conf.effect === 'loop-release' ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
+  const maximum = conf.effect === 'loop-release' ? 0 : Math.max(0, available - needed);
   conf.motion_start = Math.max(0, Math.min(maximum, Math.round(conf.motion_start * 24))) / 24;
   return {conf, count, needed, maximum};
 }
 function openTransition(index) {
   state.dialogIndex = index;
   $('transition-pair').textContent = `${state.clips[index].name} → ${state.clips[index + 1].name}`;
-  $('effect').querySelector('[value="motion-loop"]').disabled = state.clips[index + 1].frames < 4;
+  for (const mode of ['motion-loop', 'loop-release']) $('effect').querySelector(`[value="${mode}"]`).disabled = state.clips[index + 1].frames < (mode === 'loop-release' ? 13 : 4);
   updateDialog(); $('transition-dialog').showModal();
 }
 function motionFrame(play = false) {
@@ -156,11 +158,11 @@ function motionFrame(play = false) {
 function updateDialog() {
   const {conf, needed, maximum} = clampMotion(state.dialogIndex);
   $('effect').value = conf.effect;
-  const ending = conf.ending ?? (['frame-melt', 'motion-loop'].includes(conf.effect) ? 'flow' : 'reset');
+  const ending = conf.ending ?? (['frame-melt', 'motion-loop', 'loop-release'].includes(conf.effect) ? 'flow' : 'reset');
   $('ending').value = ending;
   $('ending-control').hidden = conf.effect === 'cut';
   $('duration-note').textContent = ending === 'flow' ? 'After this duration, normal motion continues without a hard image reset. Distortion can persist.' : 'After this duration, the clear incoming picture is restored. This can create a visible jump.';
-  $('duration').min = conf.effect === 'motion-loop' ? 3 : 1;
+  $('duration').min = conf.effect === 'loop-release' ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
   $('duration').max = Math.min(144, state.clips[state.dialogIndex + 1].frames - 1);
   $('duration').value = Math.round(conf.duration * 24);
   $('repeat').value = conf.repeat;
@@ -169,7 +171,7 @@ function updateDialog() {
   $('motion-start').max = maximum; $('motion-start').value = Math.round(conf.motion_start * 24);
   $('motion-start').disabled = maximum === 0;
   $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = conf.effect !== 'frame-melt';
-  $('loop-control').hidden = conf.effect !== 'motion-loop'; $('motion-control').hidden = conf.effect === 'cut';
+  $('loop-control').hidden = !['motion-loop', 'loop-release'].includes(conf.effect); $('motion-control').hidden = conf.effect === 'cut';
   $('method-note').textContent = notes[conf.effect]; $('duration-value').value = `${conf.duration.toFixed(2)} s`;
   $('repeat-value').value = `${conf.repeat}×`; $('loop-value').value = `${(conf.loop_frames / 24).toFixed(2)} s`;
   const start = conf.motion_start + 1 / 24;
@@ -214,6 +216,7 @@ async function waitForJob(id) {
 async function assemble(download = false, transitionIndex = null) {
   if (state.busy || !state.clips.length) return;
   error(); busy(true);
+  const prepared = Boolean(state.ready);
   try {
     if (!state.ready) {
       $('progress').hidden = false; $('progress').value = 0; status('Preparing sequence…');
@@ -228,7 +231,9 @@ async function assemble(download = false, transitionIndex = null) {
       const boundary = state.ready.result.boundaries[transitionIndex];
       const start = boundary.frame / 24; seek(Math.max(0, start - .75), start + boundary.duration + .75);
     }
-    if (download) {
+    if (download && touchUI() && !prepared) {
+      status('Video ready. Tap Export MP4 again to save it to your device.');
+    } else if (download) {
       const link = document.createElement('a'); link.href = `${state.ready.url}?download=1`; link.download = 'h4-mosh-lab.mp4';
       link.hidden = true; document.body.append(link); link.click(); link.remove();
     }
@@ -254,7 +259,8 @@ async function restore() {
   busy(true);
   try {
     const savedJob = sessionStorage.getItem('h4-job');
-    const data = await request('/api/clips');
+    const [data, connection] = await Promise.all([request('/api/clips'), request('/api/connection').catch(() => ({phone_url: null}))]);
+    state.phoneUrl = connection.phone_url; $('phone-info').hidden = !state.phoneUrl;
     state.clips = data.clips; state.active = state.clips[0]?.id || null;
     const saved = JSON.parse(sessionStorage.getItem('h4-sequence') || 'null');
     if (saved) {
@@ -277,3 +283,12 @@ async function restore() {
   finally { busy(false); $('progress').hidden = true; draw(); }
 }
 restore();
+
+$('copy-phone').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(state.phoneUrl);
+    $('phone-status').textContent = ' Link copied. Send it to your phone and open it on the same Wi-Fi.';
+  } catch {
+    $('phone-status').textContent = ' Copy the full Phone link from the Mac terminal.';
+  }
+};

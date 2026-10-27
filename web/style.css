@@ -3,3 +3,22 @@
 #motion-control{margin-top:20px;border-top:1px solid #ddd;padding-top:14px}#motion-control summary{font-size:12px;cursor:pointer}#motion-control label{display:block;font-size:12px;margin-top:16px}#motion-preview{display:block;width:100%;height:150px;object-fit:contain;background:#151515;border-radius:3px}#watch-motion{width:100%}
 
 dialog .section-label{position:sticky;top:0;background:#f8f8f6;z-index:1}
+
+@media(pointer:coarse){
+  button,.button{min-height:44px}
+  .clip{flex-basis:176px}
+  .clip-controls button{min-width:44px;min-height:44px;padding:8px}
+  select{font-size:16px;min-height:44px}
+  input[type=range]{height:44px;margin:6px 0}
+  #timeline{overscroll-behavior-x:contain}
+  main{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right));padding-bottom:max(24px,env(safe-area-inset-bottom))}
+}
+
+#phone-info{margin:0 0 16px}#phone-info button{margin-right:8px}
+
+/* Original h4ngelic artwork; smaller monochrome desktop pointer. */
+.h4-cursor{position:fixed;left:0;top:0;width:22px;height:33px;z-index:2147483647;pointer-events:none;user-select:none;margin:0;padding:0}
+.h4-cursor img{display:block;width:100%;height:100%;transform:rotate(-15deg);transform-origin:7px 2px;transition:transform 180ms ease-out;pointer-events:none}
+.h4-cursor.is-clickable img{transform:rotate(15deg)}
+@media(hover:hover) and (pointer:fine){html.h4-cursor-ready,html.h4-cursor-ready *{cursor:none!important}}
+@media(prefers-reduced-motion:reduce){.h4-cursor img{transition:none}}

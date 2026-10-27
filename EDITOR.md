@@ -190,3 +190,13 @@ or decoded-frame interpolation is used.
 Browser coverage now also verifies selecting an individual clip and returning to
 the complete film without another render request, retaining playback position,
 ending selection/persistence, and default flow reaching the actual output.
+
+## H4 cursor
+
+The original cursor artwork from the supplied h4ngelic HTML preview is served
+locally as web/h4-cursor.svg. Desktop mouse only: 22x33 pixels, black with a white
+outline, -15 degrees at rest and +15 over enabled interactive controls, with a
+180ms rotation. Reduced-motion mode removes the animation. Native video controls,
+touch input and asset-load failures retain the native pointer.
+Optional Chromium validation: `python3 tests/browser_cursor.py` with the server
+running; set H4_EDITOR_TEST_URL if using a different port.
