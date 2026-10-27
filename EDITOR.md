@@ -39,10 +39,14 @@ The cloud run was validated on Linux/Chromium; Mac/Safari has not been tested.
    an indeterminate preparation phase.
 2. Select a clip to preview it. Drag cards to reorder or use the keyboard-accessible
    arrow buttons. Remove a clip with ×; its temporary server files are released.
-3. Select a connector between clips. Choose Cut, Classic Mosh or Frame Melt.
+3. Select a connector between clips. Choose Cut, Classic Mosh, Frame Melt or Motion Loop.
    Duration is quantized to 1/24 second, with numeric feedback, up to six seconds
    and the incoming clip's available P-frame count. Melt exposes only the verified
-   repetition count, 2–12. Cut hides effect-only controls. No shader or fake mode.
+   repetition count, 2–12. Motion Loop repeats a selectable short prediction group.
+   Optional Choose motion controls let you see and select the donor movement.
+   Connector labels use separate name/time lines and fit their contents, including
+   at 200% zoom; existing fonts and background are retained.
+   [Details and comparison](MOTION_LOOP.md). Cut hides effect-only controls. No shader or fake mode.
 4. Assemble the preview. The server creates and fully decodes an actual MP4 before
    declaring it ready. Status shows assembly stages, encoding progress from FFmpeg's
    output timestamps, and final decode validation. Playback and seeking use native
@@ -101,7 +105,7 @@ python3 -m unittest discover -s tests -v
 node --check web/app.js  # Optional JS syntax check when Node is available.
 ```
 
-Eleven integration tests passed: all six original effect regressions plus full-clip
+Sixteen integration tests passed: all six original effect regressions plus full-clip
 sequencing, multiple real boundaries, normal-reference restoration, cut reordering,
 one-clip exports and invalid requests. The >6s fixture confirms no editor truncation. Missing-tool tests check startup
 diagnostics, actionable import errors, cleanup and retry after a failed import.
@@ -122,8 +126,8 @@ removal, HTTP byte ranges and local-origin rejection. It checks original upload
 hashes, JavaScript errors, and overflow at 1200px/390px widths. Screenshots and the
 actual downloaded MP4 are kept in ignored `work/browser-smoke/`.
 
-Validated with the two user-provided MOVs and one synthetic clip: 12.625-second
-three-clip render, zero JavaScript errors, complete download decode successful.
+Validated with the two user-provided MOVs and one synthetic clip: 12.583333-second
+three-clip render with two effect boundaries, zero JavaScript errors, complete download decode successful.
 
 ## Changed files and next step
 
@@ -135,7 +139,7 @@ three-clip render, zero JavaScript errors, complete download decode successful.
 
 Next recommended task: run this flow on the target Apple Silicon Mac/Safari with
 real footage, then set the required output resolution/audio behavior before applying
-the final h4ngelic design. Motion Transfer remains unavailable for the reasons in
+the final h4ngelic design. Motion Loop is verified; Motion Transfer remains unavailable for the reasons in
 [PHASE2.md](PHASE2.md); it is not exposed as a working effect.
 
 ## Import troubleshooting (including iPhone MOV)

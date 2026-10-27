@@ -2,10 +2,12 @@
 
 ## Minimal local editor
 
-Import multiple clips, reorder, set real Classic Mosh / Frame Melt transitions,
+Import multiple clips, reorder, set real Classic Mosh / Frame Melt / Motion Loop transitions,
 assemble and scrub a verified preview, and download the same MP4.
 
 [Run the editor on your Mac, workflow, limitations and tests](EDITOR.md)
+
+[New: Motion Loop, motion selection and three-mode comparison](MOTION_LOOP.md)
 
 ![Minimal editor](demo/editor/desktop.png)
 

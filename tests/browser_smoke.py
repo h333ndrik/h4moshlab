@@ -4,6 +4,7 @@ Requires Playwright + Chromium only for development tests, not the application.
 from pathlib import Path
 import json
 import os
+import re
 import hashlib
 import sys
 import shutil
@@ -38,18 +39,35 @@ with sync_playwright() as p:
     page.get_by_role('button', name=f'Move {Path(files[0]).name} left', exact=True).click()
     assert page.locator('.clip-select span').all_text_contents() == original_order
     page.locator('.connector').first.click()
-    page.locator('#effect').select_option('frame-melt')
-    page.locator('#duration').fill('12')
-    page.locator('#repeat').fill('3')
-    expect(page.locator('#duration-value')).to_have_text('0.50 s')
-    page.get_by_role('button', name='Close settings').click()
-    page.locator('.connector').nth(1).click()
     page.locator('#effect').select_option('cut')
+    expect(page.locator('#duration-control')).to_be_hidden()
+    expect(page.locator('#motion-control')).to_be_hidden()
+    page.locator('#effect').select_option('classic-mosh')
+    expect(page.locator('#repeat-control')).to_be_hidden()
+    page.locator('#effect').select_option('frame-melt')
+    expect(page.locator('#repeat-control')).to_be_visible()
+    expect(page.locator('#loop-control')).to_be_hidden()
+    page.locator('#effect').select_option('motion-loop')
+    page.locator('#duration').fill('24')
+    page.locator('#loop-length').fill('6')
+    expect(page.locator('#duration-value')).to_have_text('1.00 s')
+    expect(page.locator('#loop-value')).to_have_text('0.25 s')
+    page.get_by_text('Choose motion', exact=True).click()
+    page.locator('#motion-start').fill('12')
+    expect(page.locator('#motion-start-value')).to_have_text('0.54 s')
+    page.locator('#watch-motion').click()
+    page.wait_for_function('document.querySelector("#motion-preview").currentTime > .56')
+    page.get_by_role('button', name='Close settings').click()
+    expect(page.locator('#motion-preview')).not_to_have_attribute('src', re.compile('.+'))
+    page.locator('.connector').nth(1).click()
+    page.locator('#effect').select_option('classic-mosh')
+    page.locator('#duration').fill('12')
+    page.locator('#motion-start').fill('6')
     page.get_by_role('button', name='Close settings').click()
     # Reload preserves ordered clips and settings without duplicating uploads.
     page.reload()
     expect(page.locator('#count')).to_have_text('3 clips')
-    expect(page.locator('.connector').first).to_contain_text('Melt')
+    expect(page.locator('.connector').first).to_contain_text('Loop')
     page.locator('#assemble').click()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)
     page.wait_for_function('document.querySelector("#player").videoWidth === 640 && document.querySelector("#player").videoHeight === 480')
@@ -60,6 +78,9 @@ with sync_playwright() as p:
     duration = page.locator('#player').evaluate('(v) => v.duration')
     with urllib.request.urlopen(base+'/api/jobs/'+url.rsplit('/', 1)[1]) as response:
         report = json.load(response)['result']
+    assert report['boundaries'][0]['effect'] == 'motion-loop'
+    assert report['boundaries'][0]['b_vop_indices'] == [13+i%6 for i in range(24)]
+    assert report['boundaries'][1]['b_vop_indices'] == list(range(7,19))
     assert report['source_sha256'] == [hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in files[:3]]
     page.reload()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)
@@ -77,7 +98,7 @@ with sync_playwright() as p:
     page.wait_for_function('document.querySelector("#player").currentTime < document.querySelector("#player").duration - 1')
     # Editing invalidates the previous assembled/download resource.
     page.locator('.connector').first.click()
-    page.locator('#duration').fill('13')
+    page.locator('#duration').fill('25')
     page.get_by_role('button', name='Close settings').click()
     expect(page.locator('#download')).to_be_hidden()
     page.route('**/api/jobs', lambda route: route.fulfill(status=503, content_type='application/json', body='{"error":"Test processing failure"}'))
@@ -99,7 +120,15 @@ with sync_playwright() as p:
     page.screenshot(path=str(artifacts/'desktop.png'), full_page=True)
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    assert page.locator('.connector').evaluate_all('items => items.every(el => el.scrollWidth <= el.clientWidth)')
     page.screenshot(path=str(artifacts/'mobile.png'), full_page=True)
+    page.locator('.connector').first.click()
+    page.locator('#motion-control').evaluate('(el) => {el.open = true}')
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    assert page.locator('.connector').evaluate_all('items => items.every(el => el.scrollWidth <= el.clientWidth)')
+    page.locator('#preview-transition').scroll_into_view_if_needed()
+    page.screenshot(path=str(artifacts/'motion-settings.png'), full_page=True)
+    page.get_by_role('button', name='Close settings').click()
     # Remove releases the server-side clip and invalidates the render.
     page.get_by_role('button', name=f'Remove {Path(files[2]).name}', exact=True).click()
     expect(page.locator('#count')).to_have_text('2 clips')

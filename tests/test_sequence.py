@@ -60,6 +60,16 @@ class SequenceTests(unittest.TestCase):
         single = render([self.clips[1]], [], self.root/'single')
         self.assertEqual(single['frames'], 48)
 
+    def test_motion_loop_selected_range_and_clean_restoration(self):
+        result = render(self.clips[:2], [{'effect': 'motion-loop', 'duration': .5,
+                         'loop_frames': 4, 'motion_start': .25}], self.root/'loop')
+        _, actual = vops(self.root/'loop/sequence.m4v')
+        _, donor = vops(Path(self.clips[1]['normalized']))
+        self.assertEqual(actual[174:186], [donor[7+i%4] for i in range(12)])
+        self.assertEqual(result['frames'], 221)
+        self.assertEqual(result['boundaries'][0]['motion_start'], .25)
+        self.assertEqual(actual[186][4] >> 6, 0)
+
     def test_invalid_transition_does_not_render(self):
         for transitions in ([{'effect': 'motion-transfer', 'duration': .5}],
                             [{'effect': 'classic-mosh', 'duration': 3}],

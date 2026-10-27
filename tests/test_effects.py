@@ -10,8 +10,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from effects import process
-from compare import compare
+from effects import process, prediction_plan
+from compare import compare, frame
 from mosh import digest, vops
 
 
@@ -78,6 +78,48 @@ class EngineRegression(unittest.TestCase):
                              self.root/f'repeat-{repeat}.mp4', {'repeat': repeat})
             self.assertEqual(result['b_vop_indices'], [1+i//repeat for i in range(12)])
             self.assertEqual(result['output_frames'], 156)
+
+    def test_motion_loop_replays_group_and_visually_differs(self):
+        output = self.root/'loop.mp4'
+        result = process('motion-loop', self.a, self.b, 2.5, output,
+                         {'motion_start': .5, 'loop_frames': 8})
+        _, donor = vops(self.root/'loop.evidence/b.m4v')
+        _, actual = vops(self.root/'loop.evidence/effect.m4v')
+        self.assertEqual(actual[144:], [donor[13+i%8] for i in range(60)])
+        self.assertEqual(result['b_vop_indices'], [13+i%8 for i in range(60)])
+        self.assertEqual(result['output_frames'], 204)
+        self.assertEqual(result['parameters'], {'motion_start': .5, 'loop_frames': 8})
+        self.assertNotEqual(frame(output, 144), frame(output, 152))
+        selected = frame(output, 180)
+        size = 640*480*3
+        for effect in ('classic-mosh', 'frame-melt'):
+            reference = self.raw[effect][180*size:181*size]
+            error = sum(abs(a-b) for a,b in zip(selected,reference))/size
+            self.assertGreater(error, 2, effect)
+
+    def test_selected_motion_range_preserves_prediction_payloads(self):
+        for effect in ('classic-mosh', 'frame-melt'):
+            output = self.root/f'selected-{effect}.mp4'
+            result = process(effect, self.a, self.b, .5, output, {'motion_start': .5})
+            expected = [13+(i//4 if effect == 'frame-melt' else i) for i in range(12)]
+            self.assertEqual(result['b_vop_indices'], expected)
+
+    def test_loop_window_parameter_endpoints(self):
+        for length in (2,48):
+            result = process('motion-loop', self.a, self.b, 2.5,
+                             self.root/f'loop-{length}.mp4', {'loop_frames': length})
+            self.assertEqual(result['b_vop_indices'], [1+i%length for i in range(60)])
+
+    def test_invalid_motion_windows(self):
+        for kwargs in ({'motion_start': -1}, {'motion_start': float('nan')},
+                       {'motion_start': 6}, {'loop_frames': 1}, {'loop_frames': 49},
+                       {'loop_frames': 60}, {'motion_start': 5.8, 'loop_frames': 8}):
+            with self.assertRaises(ValueError):
+                prediction_plan(144, 'motion-loop', 60, **kwargs)
+        with self.assertRaises(ValueError):
+            prediction_plan(144, 'classic-mosh', 60, motion_start=4)
+        with self.assertRaises(ValueError):
+            prediction_plan(3, 'motion-loop', 2)
 
     def test_original_files_preserved(self):
         self.assertEqual([digest(self.a), digest(self.b)], self.hashes)

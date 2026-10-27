@@ -9,17 +9,55 @@ from pathlib import Path
 from mosh import digest, normalize, probe, run, vops
 
 EFFECTS = {
-    'classic-mosh': {'parameters': {}, 'method': 'Remove B I-VOP; append B P-VOPs unchanged.'},
-    'frame-melt': {'parameters': {'repeat': {'default': 4, 'min': 2, 'max': 12}},
+    'classic-mosh': {'parameters': {'motion_start': {'default': 0}}, 'method': 'Remove B I-VOP; append B P-VOPs unchanged.'},
+    'frame-melt': {'parameters': {'motion_start': {'default': 0}, 'repeat': {'default': 4, 'min': 2, 'max': 12}},
                    'method': 'Remove B I-VOP; repeat compressed B P-VOPs against evolving references.'},
+    'motion-loop': {'parameters': {'motion_start': {'default': 0}, 'loop_frames': {'default': 12, 'min': 2, 'max': 48}},
+                    'method': 'Replay a selected group of compressed B P-VOPs against evolving references.'},
 }
 
-def prediction_tail(packets, effect, count, repeat=4):
-    """Shared compressed-domain operation used by CLI and sequence renderer."""
+
+def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None):
+    """Validate/select donor VOP indices without decoding or altering their payloads.
+
+    motion_start is seconds from B's first P-VOP, rounded to 24fps. Output duration
+    is independent of donor progress. Loop repeats a group, Melt repeats each VOP.
+    """
     if effect not in EFFECTS:
         raise ValueError('Unsupported effect')
-    repeat = repeat if effect == 'frame-melt' else 1
-    indices = [1 + i//repeat for i in range(count)]
+    if type(count) is not int or not 1 <= count <= frame_count-1:
+        raise ValueError('Transition exceeds the incoming clip motion frames.')
+    if type(motion_start) not in (int, float) or not math.isfinite(motion_start) or motion_start < 0:
+        raise ValueError('motion_start must be a nonnegative finite number of seconds')
+    offset = round(motion_start*24)
+    available = frame_count-1-offset
+    if available < 1:
+        raise ValueError('Motion start is outside the incoming clip.')
+    config = {'motion_start': offset/24}
+    if effect == 'frame-melt':
+        if type(repeat) is not int or not 2 <= repeat <= 12:
+            raise ValueError('repeat must be an integer from 2 through 12')
+        positions = [i//repeat for i in range(count)]
+        config['repeat'] = repeat
+    elif effect == 'motion-loop':
+        if loop_frames is None:
+            loop_frames = min(12, available, count-1)
+        if type(loop_frames) is not int or not 2 <= loop_frames <= 48 or loop_frames >= count:
+            raise ValueError('Choose 2–48 loop frames and an effect longer than one loop.')
+        if loop_frames > available:
+            raise ValueError('The selected motion loop extends beyond the incoming clip.')
+        positions = [i % loop_frames for i in range(count)]
+        config['loop_frames'] = loop_frames
+    else:
+        positions = list(range(count))
+    if max(positions) >= available:
+        raise ValueError('Selected motion range is too short; move its start earlier or shorten the effect.')
+    return [1+offset+i for i in positions], config
+
+
+def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None):
+    """Shared compressed-domain operation used by CLI and sequence renderer."""
+    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames)
     return indices, [packets[i] for i in indices]
 
 
@@ -34,9 +72,7 @@ def process(effect, a, b, transition_duration, output, parameters=None):
     params = dict(parameters or {})
     if set(params) - set(EFFECTS[effect]['parameters']):
         raise ValueError('Unsupported parameter')
-    repeat = params.get('repeat', 4) if effect == 'frame-melt' else 1
-    if effect == 'frame-melt' and (type(repeat) is not int or not 2 <= repeat <= 12):
-        raise ValueError('repeat must be an integer from 2 through 12')
+    repeat = params.get('repeat', 4)
     if not math.isfinite(transition_duration) or not 1/24 <= transition_duration <= 6:
         raise ValueError('transition_duration must be between 1/24 and 6 seconds')
     count = round(transition_duration * 24)
@@ -58,7 +94,8 @@ def process(effect, a, b, transition_duration, output, parameters=None):
     # Equal output duration across effects. Melt progresses more slowly through B.
     if count > len(bv)-1:
         raise ValueError(f'Transition too long for B: maximum {(len(bv)-1)/24:.6f}s')
-    indices, tail = prediction_tail(bv, effect, count, repeat)
+    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'))
+    tail = [bv[i] for i in indices]
     stream = evidence / 'effect.m4v'
     stream.write_bytes(header + b''.join(av + tail))
     # Full manipulated-stream decode is also checked, before delivery encoding.
@@ -75,7 +112,7 @@ def process(effect, a, b, transition_duration, output, parameters=None):
         raise RuntimeError('Compressed payload verification failed')
     if any(digest(Path(p)) != h for p,h in originals.items()):
         raise RuntimeError('Original source changed')
-    result = {'effect': effect, 'parameters': {'repeat': repeat} if repeat > 1 else {},
+    result = {'effect': effect, 'parameters': {k:v for k,v in config.items() if k != 'motion_start' or v != 0},
               'requested_transition_duration': transition_duration, 'transition_duration': count/24,
               'boundary_frame': len(av), 'output_frames': len(av)+count,
               'source_sha256': originals, 'source_files_unchanged': True,
@@ -91,9 +128,15 @@ if __name__ == '__main__':
     parser.add_argument('--a', type=Path, required=True)
     parser.add_argument('--b', type=Path, required=True)
     parser.add_argument('--duration', type=float, required=True, help='Seconds of effect after A, rounded to 24fps')
+    parser.add_argument('--motion-start', type=float, default=0, help='Seconds into B motion (first P-VOP = zero)')
+    parser.add_argument('--loop-frames', type=int, help='motion-loop only: size of the compressed prediction group')
     parser.add_argument('--repeat', type=int, help='frame-melt only: compressed P-VOP repetition count')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    parameters = {} if args.repeat is None else {'repeat': args.repeat}
+    parameters = {'motion_start': args.motion_start}
+    if args.repeat is not None:
+        parameters['repeat'] = args.repeat
+    if args.loop_frames is not None:
+        parameters['loop_frames'] = args.loop_frames
     result = process(args.effect, args.a, args.b, args.duration, args.output, parameters)
     print(json.dumps({k:result[k] for k in ('effect','output','boundary_frame','output_frames','transition_duration')}))

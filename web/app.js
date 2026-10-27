@@ -2,8 +2,8 @@
 const $ = id => document.getElementById(id);
 const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null};
 const player = $('player');
-const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt'};
-const notes = {'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.'};
+const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'motion-loop': 'Motion Loop'};
+const notes = {'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message) { $('status').textContent = message; }
@@ -15,7 +15,8 @@ function source(url, label) {
 function setting(index) {
   const incoming = state.clips[index + 1], key = `${state.clips[index].id}|${incoming.id}`;
   if (!state.settings.has(key)) state.settings.set(key, {effect: 'classic-mosh', duration: Math.min(24, incoming.frames - 1) / 24, repeat: 4});
-  return state.settings.get(key);
+  const conf = state.settings.get(key); conf.motion_start ??= 0; conf.loop_frames ??= 12;
+  return conf;
 }
 function invalidate() {
   try { sessionStorage.removeItem('h4-job'); } catch {}
@@ -41,8 +42,11 @@ function draw() {
   state.clips.forEach((clip, index) => {
     if (index) {
       const conf = setting(index - 1);
-      const connector = button(`${conf.effect === 'cut' ? 'Cut' : conf.effect === 'frame-melt' ? 'Melt' : 'Mosh'}\n${conf.effect === 'cut' ? '—' : conf.duration.toFixed(2) + 's'}`, () => openTransition(index - 1), `Transition ${index}: ${names[conf.effect]}`);
-      connector.className = 'connector'; timeline.append(connector);
+      const connector = button('', () => openTransition(index - 1), `Transition ${index}: ${names[conf.effect]}`);
+      const method = document.createElement('span');
+      method.textContent = conf.effect === 'cut' ? 'Cut' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
+      const time = document.createElement('span'); time.textContent = conf.effect === 'cut' ? '—' : `${conf.duration.toFixed(2)} s`;
+      connector.className = 'connector'; connector.append(method, time); timeline.append(connector);
     }
     const card = document.createElement('div'); card.className = `clip${state.active === clip.id ? ' active' : ''}`;
     card.draggable = !state.busy;
@@ -109,22 +113,77 @@ $('files').onchange = async event => {
     status('Clips ready. Choose transitions, then assemble the preview.');
   } catch (e) { error(e.message); status('Import failed. See the message below; you can retry.'); } finally { busy(false); $('progress').hidden = true; }
 };
+function clampMotion(index) {
+  const conf = setting(index), available = state.clips[index + 1].frames - 1;
+  const minimum = conf.effect === 'motion-loop' ? 3 : 1;
+  const count = Math.max(minimum, Math.min(144, available, Math.round(conf.duration * 24)));
+  conf.duration = count / 24;
+  conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
+  conf.loop_frames = Math.max(2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
+  const needed = conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
+  const maximum = Math.max(0, available - needed);
+  conf.motion_start = Math.max(0, Math.min(maximum, Math.round(conf.motion_start * 24))) / 24;
+  return {conf, count, needed, maximum};
+}
 function openTransition(index) {
-  state.dialogIndex = index; const conf = setting(index);
+  state.dialogIndex = index;
   $('transition-pair').textContent = `${state.clips[index].name} → ${state.clips[index + 1].name}`;
-  $('effect').value = conf.effect; $('duration').max = Math.min(144, state.clips[index + 1].frames - 1);
-  $('duration').value = Math.round(conf.duration * 24); $('repeat').value = conf.repeat;
+  $('effect').querySelector('[value="motion-loop"]').disabled = state.clips[index + 1].frames < 4;
   updateDialog(); $('transition-dialog').showModal();
 }
-function updateDialog() {
-  const conf = setting(state.dialogIndex);
-  $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = conf.effect !== 'frame-melt';
-  $('method-note').textContent = notes[conf.effect]; $('duration-value').value = `${conf.duration.toFixed(2)} s`;
-  $('repeat-value').value = `${conf.repeat}×`;
+function motionFrame(play = false) {
+  const video = $('motion-preview'), clip = state.clips[state.dialogIndex + 1];
+  const {conf, needed} = clampMotion(state.dialogIndex);
+  const position = (Math.round(conf.motion_start * 24) + 1) / 24;
+  video.pause(); state.motionEnd = null;
+  if (state.motionSeek) video.removeEventListener('loadedmetadata', state.motionSeek);
+  if (state.motionPlay) video.removeEventListener('seeked', state.motionPlay);
+  state.motionSeek = state.motionPlay = null;
+  const begin = () => {
+    state.motionPlay = null;
+    if (!$('transition-dialog').open) return;
+    state.motionEnd = position + needed / 24;
+    video.play().catch(e => { if ($('transition-dialog').open) error(`Source preview: ${e.message}`); });
+  };
+  const apply = () => {
+    state.motionSeek = null; video.currentTime = Math.min(position, video.duration - .001);
+    if (play) { if (video.seeking) { state.motionPlay = begin; video.addEventListener('seeked', begin, {once: true}); } else begin(); }
+  };
+  if (video.getAttribute('src') !== clip.preview) { video.src = clip.preview; video.load(); }
+  if (video.readyState >= 1) apply(); else { state.motionSeek = apply; video.addEventListener('loadedmetadata', apply, {once: true}); }
 }
-for (const id of ['effect', 'duration', 'repeat']) $(id).addEventListener('input', () => {
+function updateDialog() {
+  const {conf, needed, maximum} = clampMotion(state.dialogIndex);
+  $('effect').value = conf.effect;
+  $('duration').min = conf.effect === 'motion-loop' ? 3 : 1;
+  $('duration').max = Math.min(144, state.clips[state.dialogIndex + 1].frames - 1);
+  $('duration').value = Math.round(conf.duration * 24);
+  $('repeat').value = conf.repeat;
+  $('loop-length').max = Math.min(48, Math.round(conf.duration * 24) - 1, state.clips[state.dialogIndex + 1].frames - 1);
+  $('loop-length').value = conf.loop_frames;
+  $('motion-start').max = maximum; $('motion-start').value = Math.round(conf.motion_start * 24);
+  $('motion-start').disabled = maximum === 0;
+  $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = conf.effect !== 'frame-melt';
+  $('loop-control').hidden = conf.effect !== 'motion-loop'; $('motion-control').hidden = conf.effect === 'cut';
+  $('method-note').textContent = notes[conf.effect]; $('duration-value').value = `${conf.duration.toFixed(2)} s`;
+  $('repeat-value').value = `${conf.repeat}×`; $('loop-value').value = `${(conf.loop_frames / 24).toFixed(2)} s`;
+  const start = conf.motion_start + 1 / 24;
+  $('motion-start-value').value = `${start.toFixed(2)} s`;
+  $('motion-window').textContent = `${start.toFixed(2)}–${(start + needed / 24).toFixed(2)} s of the incoming clip. The rest of your sequence stays in place.`;
+  motionFrame();
+}
+for (const id of ['effect', 'duration', 'repeat', 'loop-length', 'motion-start']) $(id).addEventListener('input', () => {
   const conf = setting(state.dialogIndex); conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
-  invalidate(); draw(); updateDialog();
+  conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
+  clampMotion(state.dialogIndex); invalidate(); draw(); updateDialog();
+});
+$('watch-motion').onclick = () => motionFrame(true);
+$('motion-preview').addEventListener('timeupdate', () => { if (state.motionEnd !== null && $('motion-preview').currentTime >= state.motionEnd) { $('motion-preview').pause(); state.motionEnd = null; } });
+$('transition-dialog').addEventListener('close', () => {
+  const video = $('motion-preview'); video.pause();
+  if (state.motionSeek) video.removeEventListener('loadedmetadata', state.motionSeek);
+  if (state.motionPlay) video.removeEventListener('seeked', state.motionPlay);
+  state.motionSeek = state.motionPlay = null; state.motionEnd = null; video.removeAttribute('src'); video.load();
 });
 function showResult(job) {
   source(job.url, 'Assembled preview · real codec processing');
@@ -179,7 +238,7 @@ player.addEventListener('timeupdate', () => {
   }
 });
 player.addEventListener('error', () => { if (player.getAttribute('src')) error('Preview could not be loaded. Try assembling again or download the MP4.'); });
-window.addEventListener('beforeunload', () => { abort.abort(); player.pause(); player.removeAttribute('src'); player.load(); });
+window.addEventListener('beforeunload', () => { $('motion-preview').pause(); $('motion-preview').removeAttribute('src'); $('motion-preview').load(); abort.abort(); player.pause(); player.removeAttribute('src'); player.load(); });
 async function restore() {
   busy(true);
   try {

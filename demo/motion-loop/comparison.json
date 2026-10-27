@@ -1,0 +1,11 @@
+{
+  "frame": 105,
+  "loop_vs_other_rgb_mae_8bit": {
+    "classic-window": 35.126736111111114,
+    "melt-window": 29.645269097222222
+  },
+  "layout": "Classic | Frame Melt | Motion Loop",
+  "motion_start": 0.5,
+  "effect_duration": 2.5,
+  "loop_frames": 8
+}

@@ -8,6 +8,8 @@
 
 ![Frame Melt frame strip](demo/phase2/frame-melt.png)
 
+Motion Loop and motion-source selection are now available; see [MOTION_LOOP.md](MOTION_LOOP.md).
+
 Current normalization, previews and exports are 640×480; the Phase 2 demo
 files and measurements below document the earlier 320×240 run.
 

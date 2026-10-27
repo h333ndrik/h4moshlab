@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 import subprocess
 
-from effects import EFFECTS, prediction_tail
+from effects import EFFECTS, prediction_plan
 from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
 
 FPS = 24
@@ -45,8 +45,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
         if effect != 'cut':
             if type(duration) not in (int, float) or not math.isfinite(duration) or not 1/FPS <= duration <= min(6, (clip['frames']-1)/FPS):
                 raise ValueError('Transition duration exceeds the incoming clip (maximum 6s).')
-            if effect == 'frame-melt' and (type(repeat) is not int or not 2 <= repeat <= 12):
-                raise ValueError('Melt repeat must be an integer from 2 to 12.')
+            prediction_plan(clip['frames'], effect, round(duration*FPS), repeat, transition.get('motion_start', 0), transition.get('loop_frames'))
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     stream = directory/'sequence.m4v'
@@ -63,8 +62,11 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
             else:
                 transition = transitions[i-1]
                 count = round(transition['duration']*FPS)
-                indices, tail = prediction_tail(packets, transition['effect'], count, transition.get('repeat', 4))
+                indices, config = prediction_plan(len(packets), transition['effect'], count, transition.get('repeat', 4),
+                                                 transition.get('motion_start', 0), transition.get('loop_frames'))
+                tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
+                                   'motion_start': config['motion_start'], 'parameters': config,
                                    'b_vop_indices': indices,
                                    'payload_sha256': [hashlib.sha256(p).hexdigest() for p in tail]})
                 target.write(b''.join(tail))
