@@ -3,6 +3,7 @@ Requires Playwright + Chromium only for development tests, not the application.
 """
 from pathlib import Path
 import json
+import os
 import hashlib
 import sys
 import shutil
@@ -16,7 +17,7 @@ if len(files) < 3:
     raise SystemExit('Usage: python3 tests/browser_smoke.py VIDEO_A VIDEO_B VIDEO_C')
 artifacts = ROOT/'work/browser-smoke'
 artifacts.mkdir(parents=True, exist_ok=True)
-base = 'http://127.0.0.1:8765'
+base = os.environ.get('H4_EDITOR_TEST_URL', 'http://127.0.0.1:8765')
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=shutil.which('chromium'))
     page = browser.new_page(viewport={'width': 1200, 'height': 1000}, accept_downloads=True)
@@ -51,7 +52,7 @@ with sync_playwright() as p:
     expect(page.locator('.connector').first).to_contain_text('Melt')
     page.locator('#assemble').click()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)
-    page.wait_for_function('document.querySelector("#player").videoWidth === 320')
+    page.wait_for_function('document.querySelector("#player").videoWidth === 640 && document.querySelector("#player").videoHeight === 480')
     page.locator('#player').evaluate('(v) => v.play()')
     page.wait_for_function('document.querySelector("#player").currentTime > .3')
     page.locator('#player').evaluate('(v) => v.pause()')

@@ -79,8 +79,8 @@ Effects occupy the beginning of an incoming clip; they are not overlap dissolves
 Each mosh boundary drops one source frame (B's initial I-frame), as in Phase 1.
 The rest of the clip remains; Melt may visibly jump to normal B when its window
 ends because it traverses fewer donor frames. A normal cut drops no frames.
-Outputs remain silent 320×240/24fps with preserved aspect ratio, not production-
-resolution/audio exports. This limitation is displayed in the interface.
+Outputs are silent 640×480/24fps with preserved aspect ratio. Audio and
+selectable higher-resolution exports are not implemented. This limitation is displayed in the interface.
 
 Private originals, normalized clips, reference-restoration streams, render logs,
 VOP indices/payload hashes and verification JSON live under ignored

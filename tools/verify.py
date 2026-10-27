@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import subprocess
+from mosh import WIDTH, HEIGHT
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'output'
@@ -19,7 +20,7 @@ metrics = []
 for index in indices:
     m = frame(OUT / 'test-mosh.mp4', index)
     b = frame(OUT / 'test-cut.mp4', index+1)  # B I-frame was removed from mosh
-    assert len(m) == len(b) == len(last) == 320*240*3
+    assert len(m) == len(b) == len(last) == WIDTH*HEIGHT*3
     delta = [y-x for x,y in zip(last,b)]
     denom = sum(d*d for d in delta)
     alpha = max(0, min(1, sum((v-a)*d for v,a,d in zip(m,last,delta))/denom)) if denom else 0

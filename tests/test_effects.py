@@ -53,15 +53,16 @@ class EngineRegression(unittest.TestCase):
         _, actual = vops(self.root/'output/frame-melt.evidence/effect.m4v')
         self.assertEqual(actual[144:], [bv[1+i//4] for i in range(60)])
         # Replaying a compressed P-frame is not holding a decoded frame.
-        size = 320*240*3
+        size = 640*480*3
         frames = [self.raw['frame-melt'][(144+i)*size:(145+i)*size] for i in range(4)]
         self.assertEqual(len(set(frames)), 4)
 
     def test_output_frames_and_visual_distinction(self):
         for result in self.results.values():
+            self.assertEqual((result['probe']['streams'][0]['width'], result['probe']['streams'][0]['height']), (640, 480))
             self.assertEqual(result['output_frames'], 204)
             self.assertEqual(int(result['probe']['streams'][0]['nb_frames']), 204)
-        size = 320*240*3
+        size = 640*480*3
         classic, melt = [self.raw[k] for k in ('classic-mosh','frame-melt')]
         self.assertEqual(classic[:144*size], melt[:144*size])
         self.assertEqual(len(classic), 204*size)

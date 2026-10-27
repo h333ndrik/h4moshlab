@@ -8,6 +8,9 @@
 
 ![Frame Melt frame strip](demo/phase2/frame-melt.png)
 
+Current normalization, previews and exports are 640×480; the Phase 2 demo
+files and measurements below document the earlier 320×240 run.
+
 Result: Classic Mosh preserved; one new codec-level effect, Frame Melt, verified.
 Motion Transfer is blocked, not an alias or an advertised API mode. No UI work.
 

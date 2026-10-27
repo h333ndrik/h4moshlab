@@ -13,6 +13,9 @@ assemble and scrub a verified preview, and download the same MP4.
 python3 tools/server.py --port 8765
 ```
 
+New processing, previews and exports use **640×480 at 24fps**. Existing demo
+files below are historical 320×240 renders; re-import and render to use the new size.
+
 No frontend build or extra runtime dependencies. The simple styling can be refined later.
 
 Phase 2 adds a verified Frame Melt mode and a common local API while preserving
@@ -78,7 +81,7 @@ has not been tested here. On existing samples, omit `--synthetic` to require the
 ## Exact technique
 
 1. Preserve and SHA-256 hash the original files. Probe their streams and durations.
-2. Encode temporary copies as MPEG-4 Part 2 elementary streams: 320×240, letterboxed,
+2. Encode temporary copies as MPEG-4 Part 2 elementary streams: 640×480, letterboxed,
    square pixels, 24 fps, YUV420p, quality 4, GOP 10000, scene threshold 0, no B-frames.
 3. Locate VOP start codes `00 00 01 B6`. The next byte's high two bits identify
    I=0, P=1, B=2. Require exactly one initial I-VOP and subsequent P-VOPs in each clip.
@@ -97,7 +100,7 @@ not required: FFmpeg's native MPEG-4 encoder and a small VOP splicer suffice.
 
 ## Evidence and outputs
 
-- `output/test-mosh.mp4`: 287 frames, 11.958333 seconds, H.264, 320×240, 24 fps.
+- `output/test-mosh.mp4`: 287 frames, 11.958333 seconds, H.264, 640×480, 24 fps.
 - `output/test-cut.mp4`: 288-frame ordinary-cut control.
 - `output/verification.json`: source metadata, original hashes, source GOP/keyframe
   inspection, normalized VOP types, exact retained-payload equality and decode result.
@@ -105,7 +108,7 @@ not required: FFmpeg's native MPEG-4 encoder and a small VOP splicer suffice.
   Columns show A's last frame, then B motion at approximately 0, 0.46, 1.46, 2.96,
   and 5.46 seconds after the boundary. B comparisons account for the removed I-frame.
 
-Verified cloud run: both originals H.264, 320×240, 24 fps, 6 seconds/144 frames,
+Historical Phase 1 cloud run (320×240 outputs): both originals H.264, 320×240, 24 fps, 6 seconds/144 frames,
 with one initial keyframe each; A has 1 I/42 P/101 B, B has 1 I/40 P/103 B.
 Temporary copies each have 1 I/143 P/0 B. All 143 appended B P-VOPs are unchanged.
 Original SHA-256 hashes match after processing. The complete final MP4 passes
@@ -120,7 +123,7 @@ the visual check; the direct VOP-byte comparison establishes the codec mechanism
 
 ## Limits
 
-Fixed proof: six seconds per source, 320×240, 24 fps, silent, drops B's first frame.
+Fixed proof: six seconds per source, 640×480, 24 fps, silent, drops B's first frame.
 Inputs may use codecs FFmpeg can decode; manipulation itself supports only the
 script's normalized MPEG-4 Part 2 I/P stream, not arbitrary H.264/HEVC/AV1 streams.
 Residuals and intra-coded macroblocks can gradually replace A; the effect depends

@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 from effects import process
-from mosh import run
+from mosh import WIDTH, HEIGHT, run
 
 
 def frame(path, index):
@@ -36,7 +36,7 @@ def compare(a, b, duration, output_dir, repeat=4):
             '-vf', f"select='{expression}',tile={len(indices)}x1", '-frames:v', '1', directory/f'{effect}.png')
     index = boundary+count//2
     left, right = [frame(directory/f'{effect}.mp4', index) for effect in reports]
-    if len(left) != 320*240*3 or len(right) != len(left):
+    if len(left) != WIDTH*HEIGHT*3 or len(right) != len(left):
         raise RuntimeError('Missing comparison frame')
     difference = sum(abs(a-b) for a,b in zip(left,right))/len(left)
     if difference <= 2:

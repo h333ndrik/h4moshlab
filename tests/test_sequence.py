@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from sequence import prepare, render
-from mosh import digest, run, vops
+from mosh import digest, probe, run, vops
 
 
 class SequenceTests(unittest.TestCase):
@@ -32,6 +32,9 @@ class SequenceTests(unittest.TestCase):
         progress = []
         result = render(self.clips, transitions, self.root/'effects', lambda stage, p: progress.append(p))
         self.assertEqual(self.clips[0]['frames'], 174)  # Full clip, not Phase 1's six-second cap.
+        self.assertEqual(result['size'], '640x480')
+        video = probe(self.root/'effects/sequence.mp4')['streams'][0]
+        self.assertEqual((video['width'], video['height']), (640, 480))
         self.assertEqual(result['frames'], 174+47+35)
         self.assertEqual([b['frame'] for b in result['boundaries']], [174, 221])
         _, actual = vops(self.root/'effects/sequence.m4v')

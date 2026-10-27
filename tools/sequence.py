@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 from effects import EFFECTS, prediction_tail
-from mosh import digest, normalize, probe, run, vops
+from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
 
 FPS = 24
 
@@ -109,7 +109,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
         raise RuntimeError('An input changed during rendering.')
     report = {'frames': expected, 'duration': expected/FPS, 'boundaries': boundaries,
               'source_sha256': [c['sha256'] for c in clips], 'full_decode': 'passed',
-              'size': '320x240', 'fps': FPS, 'audio': False}
+              'size': f'{WIDTH}x{HEIGHT}', 'fps': FPS, 'audio': False}
     (directory/'verification.json').write_text(json.dumps(report, indent=2)+'\n')
     progress('Ready', 1)
     return report

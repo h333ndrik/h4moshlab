@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+WIDTH, HEIGHT = 640, 480
 
 def run(*args):
     subprocess.run([str(a) for a in args], check=True)
@@ -32,7 +33,7 @@ def vops(path):
 def normalize(source, destination, max_seconds=6):
     """Shared, unchanged Phase 1 normalization; never edit the source."""
     run('ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', source, *(['-t', str(max_seconds)] if max_seconds is not None else []), '-an',
-        '-vf', 'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
+        '-vf', f'scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
         '-c:v', 'mpeg4', '-threads', '2', '-q:v', '4', '-g', '10000', '-bf', '0', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-f', 'm4v', destination)
 
@@ -75,7 +76,7 @@ def main():
     assert actual[len(a):] == b[1:], 'B prediction payloads changed'
     assert all(digest(Path(p)) == h for p, h in before.items()), 'Source changed'
     report = {'source_sha256': before, 'sources': sources,
-              'normalized': {'codec': 'mpeg4', 'size': '320x240', 'fps': 24, 'a_frames': len(a), 'b_frames': len(b), 'a_vop_types': types(a), 'b_vop_types': types(b)},
+              'normalized': {'codec': 'mpeg4', 'size': f'{WIDTH}x{HEIGHT}', 'fps': 24, 'a_frames': len(a), 'b_frames': len(b), 'a_vop_types': types(a), 'b_vop_types': types(b)},
               'boundary_frame_zero_based': len(a), 'removed_b_i_vops': 1,
               'b_p_vops_byte_identical': True, 'source_files_unchanged': True,
               'output': probe(result)}
