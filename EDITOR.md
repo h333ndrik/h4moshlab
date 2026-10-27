@@ -101,9 +101,10 @@ python3 -m unittest discover -s tests -v
 node --check web/app.js  # Optional JS syntax check when Node is available.
 ```
 
-Nine integration tests passed: all six original effect regressions plus full-clip
+Eleven integration tests passed: all six original effect regressions plus full-clip
 sequencing, multiple real boundaries, normal-reference restoration, cut reordering,
-one-clip exports and invalid requests. The >6s fixture confirms no editor truncation.
+one-clip exports and invalid requests. The >6s fixture confirms no editor truncation. Missing-tool tests check startup
+diagnostics, actionable import errors, cleanup and retry after a failed import.
 The sequence test compares actual compressed P-VOP payloads and expected I-frame
 locations, checks exact output frame counts, and fully decodes the rendered video.
 
@@ -136,3 +137,22 @@ Next recommended task: run this flow on the target Apple Silicon Mac/Safari with
 real footage, then set the required output resolution/audio behavior before applying
 the final h4ngelic design. Motion Transfer remains unavailable for the reasons in
 [PHASE2.md](PHASE2.md); it is not exposed as a working effect.
+
+## Import troubleshooting (including iPhone MOV)
+
+MOV files are accepted and transcoded on the server. An import failure does not
+by itself mean MOV is unsupported. In the same local terminal environment, check:
+
+```sh
+ffmpeg -version
+ffprobe -version
+```
+
+If either is missing, install Homebrew's FFmpeg package (`brew install ffmpeg`),
+which includes both tools. If Homebrew is installed at `/opt/homebrew` but its
+commands are not on PATH, initialize it with `eval "$(/opt/homebrew/bin/brew shellenv)"`.
+Restart the Python server from that initialized terminal and retry the import.
+The server now checks both tools before starting, rather than accepting an upload
+and displaying an incorrect format hint. Runtime missing-tool errors also name
+the install command. Other processing failures write their details to the server
+terminal; copy that error for diagnosis instead of renaming or modifying originals.

@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+import traceback
 import threading
 from urllib.parse import unquote, urlsplit
 import uuid
@@ -17,6 +18,13 @@ from sequence import prepare, render
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_UPLOAD = 128*1024*1024
+
+
+def processing_error(exc):
+    if isinstance(exc, FileNotFoundError) and Path(str(exc.filename)).name in ('ffmpeg', 'ffprobe'):
+        return ('FFmpeg/FFprobe was not found. On a Mac run: brew install ffmpeg '
+                '(includes ffprobe), then restart this server from that terminal.')
+    return 'Video processing failed. Copy the detailed error from the server terminal so the cause can be diagnosed.'
 
 
 class App:
@@ -37,8 +45,9 @@ class App:
             with self.lock:
                 self.jobs[job_id].update(status='ready', result=result, url=f'/media/job/{job_id}')
         except Exception as exc:
+            traceback.print_exc()
             with self.lock:
-                self.jobs[job_id].update(status='error', error=str(exc))
+                self.jobs[job_id].update(status='error', error=str(exc) if isinstance(exc, ValueError) else processing_error(exc))
         finally:
             self.busy.release()
 
@@ -121,8 +130,10 @@ def handler_for(app):
                 self.send_json(202, {'id': job_id})
             except (ValueError, KeyError, TypeError) as exc:
                 self.send_json(400, {'error': str(exc)})
-            except Exception:
-                self.send_json(422, {'error': 'Video processing failed. Check the format and try another file.'})
+            except Exception as exc:
+                traceback.print_exc()
+                code = 503 if isinstance(exc, FileNotFoundError) else 422
+                self.send_json(code, {'error': processing_error(exc)})
             finally:
                 if owned:
                     app.busy.release()
@@ -228,6 +239,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args()
+    missing = [name for name in ('ffmpeg', 'ffprobe') if not shutil.which(name)]
+    if missing:
+        parser.exit(2, 'Missing: ' + ', '.join(missing) + '. On a Mac run: brew install ffmpeg (includes ffprobe), then restart this server from that terminal.\n')
     (ROOT/'work').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='editor-', dir=ROOT/'work') as directory:
         app = App(directory)

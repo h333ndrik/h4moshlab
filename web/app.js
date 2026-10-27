@@ -107,7 +107,7 @@ $('files').onchange = async event => {
       const clip = await upload(file, index + 1, files.length); state.clips.push(clip); state.active ||= clip.id; invalidate(); draw();
     }
     status('Clips ready. Choose transitions, then assemble the preview.');
-  } catch (e) { error(e.message); } finally { busy(false); $('progress').hidden = true; }
+  } catch (e) { error(e.message); status('Import failed. See the message below; you can retry.'); } finally { busy(false); $('progress').hidden = true; }
 };
 function openTransition(index) {
   state.dialogIndex = index; const conf = setting(index);
