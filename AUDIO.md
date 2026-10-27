@@ -58,3 +58,10 @@ an accessible first option; granular freeze or spectral smearing would require
 more DSP work. These are audio-processing effects, not video-style I/P-frame
 manipulation. Controlled AAC/MP3 bitstream corruption would be a separate,
 experimental codec project with less predictable musical results.
+
+## Master sound switch
+
+Sound on/off beside the player now controls preview and export together. Default
+is on. Off removes the exported audio stream; it does not change source files.
+The choice is remembered for the browser session. Native player volume/mute
+controls otherwise remain preview controls, not separate export settings.

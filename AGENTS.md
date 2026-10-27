@@ -96,3 +96,16 @@ The user reverted the dark experiment. Use the original white/light background
 with its subtle gray gradient, dark text and original light cards/settings.
 Keep all effects, cursor angles (-25/0), favicon and layout. The dark screenshot
 is historical, not the current design reference.
+
+## Simple transition workflow
+
+Reset Pulse uses the first incoming I-VOP periodically, followed by repeated
+P-VOPs; it is a video effect with intentional clear flashes, not a smooth mode.
+Keep short previews separate from cached complete movies/exports. Preserve codec
+context from earlier transitions. Release is an advanced Gentler control and
+Original/Gentler comparison stays expandable. Motion Loop source marks map to
+existing start/length parameters. See TRANSITION_WORKFLOW.md.
+
+Sound on/off is a small master checkbox beside the player: original audio in
+preview AND export, default on, session-persisted. Off means no exported audio
+stream. Keep original media unchanged and do not label this audio moshing.

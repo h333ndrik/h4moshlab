@@ -9,6 +9,8 @@ from pathlib import Path
 from mosh import digest, normalize, probe, run, vops
 
 EFFECTS = {
+    'reset-pulse': {'parameters': {'motion_start': {'default': 0}, 'repeat': {'default': 4, 'min': 2, 'max': 12}, 'loop_frames': {'default': 12, 'min': 4, 'max': 48}},
+                    'method': 'Periodically replay B initial I-VOP, then repeat B P-VOPs to corrupt that reference again.'},
     'progressive-melt': {'parameters': {'motion_start': {'default': 0}, 'repeat': {'default': 4, 'min': 2, 'max': 12}},
                          'method': 'Repeat timeline-anchored P-VOPs with decreasing repetition, then continue consecutive prediction frames.'},
     'motion-stutter': {'parameters': {'motion_start': {'default': 0}, 'loop_frames': {'default': 12, 'min': 4, 'max': 48}},
@@ -26,9 +28,10 @@ EFFECTS = {
 SMOOTH_EFFECTS = ('frame-melt', 'progressive-melt', 'motion-stutter')
 for _effect in SMOOTH_EFFECTS:
     EFFECTS[_effect]['parameters']['smooth'] = {'default': False}
+    EFFECTS[_effect]['parameters']['release_duration'] = {'default': None}
 
 
-def soften_repetitions(positions):
+def soften_repetitions(positions, tail_frames=None):
     """Bound donor advances to two; reserve a timeline-aligned consecutive tail.
 
     Repeating predictions consumes output time. Catch-up is distributed across
@@ -36,7 +39,7 @@ def soften_repetitions(positions):
     still skipped; this is not interpolation or a perceptual smoothness guarantee.
     """
     count = len(positions)
-    release = count - max(1, count // 4)
+    release = count - (tail_frames if tail_frames is not None else max(1, count // 4))
     result = []
     previous = 0
     for i, desired in enumerate(positions):
@@ -47,7 +50,7 @@ def soften_repetitions(positions):
     return result
 
 
-def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False):
+def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False, release_duration=None):
     """Validate/select donor VOP indices without decoding or altering their payloads.
 
     motion_start is seconds from B's first P-VOP, rounded to 24fps. Output duration
@@ -61,15 +64,30 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         raise ValueError('motion_start must be a nonnegative finite number of seconds')
     if type(smooth) is not bool or (smooth and effect not in SMOOTH_EFFECTS):
         raise ValueError('smooth must be a boolean and is supported only for repetition effects.')
+    tail_frames = None
+    if release_duration is not None:
+        if not smooth or type(release_duration) not in (int, float) or not math.isfinite(release_duration):
+            raise ValueError('release_duration requires Gentler and a finite duration in seconds.')
+        tail_frames = round(release_duration * 24)
+        if not 1 <= tail_frames <= max(1, count // 2):
+            raise ValueError('Release must be between one frame and half the effect duration.')
     offset = round(motion_start*24)
     if smooth and offset != 0:
         raise ValueError('Smooth repetition requires motion_start=0 for a timeline-aligned exit.')
     available = frame_count-1-offset
     if available < 1:
         raise ValueError('Motion start is outside the incoming clip.')
-    if effect in ('loop-release', 'progressive-melt', 'motion-stutter') and (offset != 0 or count < 12):
+    if effect in ('loop-release', 'progressive-melt', 'motion-stutter', 'reset-pulse') and (offset != 0 or count < 12):
         raise ValueError('This timeline-aligned effect needs at least 0.5 seconds and motion_start=0 for a timeline-aligned exit.')
     config = {'motion_start': offset/24}
+    if effect == 'reset-pulse':
+        loop_frames = min(12, count-1) if loop_frames is None else loop_frames
+        if type(loop_frames) is not int or not 4 <= loop_frames <= 48 or loop_frames >= count:
+            raise ValueError('Reset interval must be 4–48 frames and shorter than the effect.')
+        if type(repeat) is not int or not 2 <= repeat <= 12:
+            raise ValueError('repeat must be an integer from 2 through 12')
+        indices = [0 if i % loop_frames == 0 else 1 + (i % loop_frames - 1) // repeat for i in range(1, count+1)]
+        return indices, {**config, 'repeat':repeat, 'loop_frames':loop_frames}
     if effect in ('frame-melt', 'progressive-melt'):
         if type(repeat) is not int or not 2 <= repeat <= 12:
             raise ValueError('repeat must be an integer from 2 through 12')
@@ -114,16 +132,18 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
     else:
         positions = list(range(count))
     if smooth:
-        positions = soften_repetitions(positions)
+        positions = soften_repetitions(positions, tail_frames)
         config['smooth'] = True
+        if tail_frames is not None:
+            config['release_duration'] = tail_frames / 24
     if max(positions) >= available:
         raise ValueError('Selected motion range is too short; move its start earlier or shorten the effect.')
     return [1+offset+i for i in positions], config
 
 
-def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False):
+def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False, release_duration=None):
     """Shared compressed-domain operation used by CLI and sequence renderer."""
-    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames, smooth)
+    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames, smooth, release_duration)
     return indices, [packets[i] for i in indices]
 
 
@@ -160,13 +180,14 @@ def process(effect, a, b, transition_duration, output, parameters=None):
     # Equal output duration across effects. Melt progresses more slowly through B.
     if count > len(bv)-1:
         raise ValueError(f'Transition too long for B: maximum {(len(bv)-1)/24:.6f}s')
-    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'), params.get('smooth', False))
+    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'), params.get('smooth', False), params.get('release_duration'))
     tail = [bv[i] for i in indices]
     stream = evidence / 'effect.m4v'
     stream.write_bytes(header + b''.join(av + tail))
     # Full manipulated-stream decode is also checked, before delivery encoding.
     run('ffmpeg', '-v', 'error', '-xerror', '-r', '24', '-i', stream, '-f', 'null', '-')
     run('ffmpeg', '-v', 'error', '-nostdin', '-y', '-fflags', '+genpts', '-r', '24', '-i', stream,
+        *(['-vf', 'setpts=N/(24*TB)', '-r', '24', '-fps_mode', 'cfr'] if effect == 'reset-pulse' else []),
         '-an', '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart', output)
     run('ffmpeg', '-v', 'error', '-xerror', '-i', output, '-f', 'null', '-')
@@ -182,6 +203,7 @@ def process(effect, a, b, transition_duration, output, parameters=None):
               'requested_transition_duration': transition_duration, 'transition_duration': count/24,
               'boundary_frame': len(av), 'output_frames': len(av)+count,
               'source_sha256': originals, 'source_files_unchanged': True,
+              'reference_reset_offsets': [i for i,p in enumerate(tail) if p[4] >> 6 == 0],
               'b_vop_indices': indices, 'b_p_vops_byte_identical': True,
               'b_payload_sha256': [hashlib.sha256(p).hexdigest() for p in tail],
               'full_intermediate_and_output_decode': 'passed', 'output': str(output), 'probe': metadata}
@@ -197,10 +219,13 @@ if __name__ == '__main__':
     parser.add_argument('--motion-start', type=float, default=0, help='Seconds into B motion (first P-VOP = zero)')
     parser.add_argument('--loop-frames', type=int, help='Loop/Release/Stutter: group or pulse size in frames')
     parser.add_argument('--repeat', type=int, help='Frame/Progressive Melt: initial P-VOP repetition count')
+    parser.add_argument('--release-duration', type=float, help='Gentler release in seconds, at most half the effect')
     parser.add_argument('--smooth', action='store_true', help='Gentler Frame/Progressive Melt or Stutter cadence; requires motion-start=0')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     parameters = {'motion_start': args.motion_start}
+    if args.release_duration is not None:
+        parameters['release_duration'] = args.release_duration
     if args.smooth:
         parameters['smooth'] = True
     if args.repeat is not None:

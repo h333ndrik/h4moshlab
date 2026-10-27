@@ -39,12 +39,12 @@ class App:
         self.busy = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=1)
 
-    def work(self, job_id, clips, transitions):
+    def work(self, job_id, clips, transitions, preview_boundary=None, include_audio=True):
         def progress(stage, fraction):
             with self.lock:
                 self.jobs[job_id].update(stage=stage, progress=fraction)
         try:
-            result = render(clips, transitions, self.root/job_id, progress)
+            result = render(clips, transitions, self.root/job_id, progress, preview_boundary=preview_boundary, include_audio=include_audio)
             with self.lock:
                 self.jobs[job_id].update(status='ready', result=result, url=f'/media/job/{job_id}')
         except Exception as exc:
@@ -128,11 +128,17 @@ def handler_for(app):
                     raise ValueError('Choose 1–12 distinct clips.')
                 if not isinstance(transitions, list) or len(transitions) != len(ids)-1 or not all(isinstance(t, dict) for t in transitions):
                     raise ValueError('One transition setting is needed per boundary.')
+                include_audio = body.get('audio', True)
+                if type(include_audio) is not bool:
+                    raise ValueError('audio must be true or false.')
+                preview = body.get('preview_boundary')
+                if preview is not None and (type(preview) is not int or not 0 <= preview < len(transitions)):
+                    raise ValueError('Choose a valid transition to preview.')
                 clips = [dict(app.clips[i]) for i in ids]
                 job_id = uuid.uuid4().hex
                 with app.lock:
                     app.jobs[job_id] = {'id': job_id, 'status': 'processing', 'stage': 'Preparing sequence', 'progress': 0}
-                app.pool.submit(app.work, job_id, clips, transitions)
+                app.pool.submit(app.work, job_id, clips, transitions, preview, include_audio)
                 owned = False
                 self.send_json(202, {'id': job_id})
             except (ValueError, KeyError, TypeError) as exc:

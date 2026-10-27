@@ -1,11 +1,12 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
+const transitionCache = new Map();
+const state = {sound:true, clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
 const smoothEffects = ['frame-melt', 'progressive-melt', 'motion-stutter'];
-const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter'];
-const names = {'progressive-melt': 'Progressive Melt', 'motion-stutter': 'Motion Stutter', 'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
-const notes = {'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
+const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter', 'reset-pulse'];
+const names = {'reset-pulse': 'Reset Pulse', 'progressive-melt': 'Progressive Melt', 'motion-stutter': 'Motion Stutter', 'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
+const notes = {'reset-pulse': 'Real codec datamoshing: the first clear frame of the incoming video flashes back at each pulse; repeated prediction frames distort it again. Intentionally rhythmic, not a smooth dissolve.', 'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
 const touchUI = () => window.matchMedia('(pointer:coarse)').matches;
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
@@ -32,6 +33,7 @@ function invalidate() {
   status(state.clips.length ? 'Sequence changed. Assemble to preview the real transitions.' : 'Ready to import.');
 }
 function controls() {
+  $('sound').disabled = state.busy;
   $('files').disabled = state.busy;
   $('import-label').style.pointerEvents = state.busy ? 'none' : '';
   $('import-label').setAttribute('aria-disabled', String(state.busy));
@@ -48,7 +50,7 @@ function draw() {
       const conf = setting(index - 1);
       const connector = button('', () => openTransition(index - 1), `Transition ${index}: ${names[conf.effect]}`);
       const method = document.createElement('span');
-      method.textContent = conf.effect === 'cut' ? 'Cut' : conf.effect === 'progressive-melt' ? 'Progressive' : conf.effect === 'motion-stutter' ? 'Stutter' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'loop-release' ? 'Release' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
+      method.textContent = conf.effect === 'reset-pulse' ? 'Pulse' : conf.effect === 'cut' ? 'Cut' : conf.effect === 'progressive-melt' ? 'Progressive' : conf.effect === 'motion-stutter' ? 'Stutter' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'loop-release' ? 'Release' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
       const time = document.createElement('span'); time.textContent = conf.effect === 'cut' ? '—' : `${conf.duration.toFixed(2)} s`;
       connector.className = 'connector'; connector.append(method, time); timeline.append(connector);
     }
@@ -123,8 +125,9 @@ function clampMotion(index) {
   const minimum = alignedEffects.includes(conf.effect) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
   const count = Math.max(minimum, Math.min(144, available, Math.round(conf.duration * 24)));
   conf.duration = count / 24;
+  if (conf.release_duration != null) conf.release_duration = Math.max(1, Math.min(Math.max(1, Math.floor(count/2)), Math.round(conf.release_duration*24))) / 24;
   conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
-  conf.loop_frames = Math.max(conf.effect === 'motion-stutter' ? 4 : 2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
+  conf.loop_frames = Math.max(['motion-stutter', 'reset-pulse'].includes(conf.effect) ? 4 : 2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
   const softened = smoothEffects.includes(conf.effect) && conf.smooth;
   const needed = alignedEffects.includes(conf.effect) || softened ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
   const maximum = alignedEffects.includes(conf.effect) || softened ? 0 : Math.max(0, available - needed);
@@ -163,6 +166,12 @@ function updateDialog() {
   $('effect').value = conf.effect;
   $('smooth-control').hidden = !smoothEffects.includes(conf.effect);
   $('smooth').value = conf.smooth ? 'smooth' : 'original';
+  const gentle = smoothEffects.includes(conf.effect) && conf.smooth;
+  $('release-control').hidden = !gentle;
+  $('release').max = Math.max(1, Math.floor(conf.duration*12));
+  $('release').value = Math.round((conf.release_duration ?? Math.max(1, Math.floor(conf.duration*24/4))/24)*24);
+  $('release-value').value = `${(Number($('release').value)/24).toFixed(2)} s`;
+  $('motion-marks').hidden = $('mark-note').hidden = conf.effect !== 'motion-loop';
   const ending = conf.ending ?? (['frame-melt', 'motion-loop', ...alignedEffects].includes(conf.effect) ? 'flow' : 'reset');
   $('ending').value = ending;
   $('ending-control').hidden = conf.effect === 'cut';
@@ -171,16 +180,16 @@ function updateDialog() {
   $('duration').max = Math.min(144, state.clips[state.dialogIndex + 1].frames - 1);
   $('duration').value = Math.round(conf.duration * 24);
   $('repeat').value = conf.repeat;
-  document.querySelector('label[for="loop-length"]').firstChild.textContent = conf.effect === 'motion-stutter' ? 'Pulse length ' : 'Loop length ';
+  document.querySelector('label[for="loop-length"]').firstChild.textContent = conf.effect === 'reset-pulse' ? 'Reset interval ' : conf.effect === 'motion-stutter' ? 'Pulse length ' : 'Loop length ';
   document.querySelector('label[for="repeat"]').firstChild.textContent = conf.effect === 'progressive-melt' ? 'Initial P-frame repetitions ' : 'P-frame repetitions ';
-  $('loop-length').min = conf.effect === 'motion-stutter' ? 4 : 2;
-  document.querySelector('#loop-control .hint').textContent = conf.effect === 'motion-stutter' ? 'Pulse length: each pulse starts with a repeated prediction frame, then continues motion. The final quarter releases the stutter.' : 'A short motion sequence is repeated, pulling the previous image further each time.';
+  $('loop-length').min = ['motion-stutter', 'reset-pulse'].includes(conf.effect) ? 4 : 2;
+  document.querySelector('#loop-control .hint').textContent = conf.effect === 'reset-pulse' ? 'Each pulse restores the first frame of the incoming video. Between pulses, prediction frames are repeated to distort it again.' : conf.effect === 'motion-stutter' ? 'Pulse length: each pulse starts with a repeated prediction frame, then continues motion. The final quarter releases the stutter.' : 'A short motion sequence is repeated, pulling the previous image further each time.';
   $('loop-length').max = Math.min(48, Math.round(conf.duration * 24) - 1, state.clips[state.dialogIndex + 1].frames - 1);
   $('loop-length').value = conf.loop_frames;
   $('motion-start').max = maximum; $('motion-start').value = Math.round(conf.motion_start * 24);
   $('motion-start').disabled = maximum === 0;
-  $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = !['frame-melt', 'progressive-melt'].includes(conf.effect);
-  $('loop-control').hidden = !['motion-loop', 'loop-release', 'motion-stutter'].includes(conf.effect); $('motion-control').hidden = conf.effect === 'cut';
+  $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = !['frame-melt', 'progressive-melt', 'reset-pulse'].includes(conf.effect);
+  $('loop-control').hidden = !['motion-loop', 'loop-release', 'motion-stutter', 'reset-pulse'].includes(conf.effect); $('motion-control').hidden = conf.effect === 'cut';
   $('method-note').textContent = notes[conf.effect]; $('duration-value').value = `${conf.duration.toFixed(2)} s`;
   $('repeat-value').value = `${conf.repeat}×`; $('loop-value').value = `${(conf.loop_frames / 24).toFixed(2)} s`;
   const start = conf.motion_start + 1 / 24;
@@ -188,10 +197,11 @@ function updateDialog() {
   $('motion-window').textContent = `${start.toFixed(2)}–${(start + needed / 24).toFixed(2)} s of the incoming clip. The rest of your sequence stays in place.`;
   motionFrame();
 }
-for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth']) $(id).addEventListener('input', () => {
+for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release']) $(id).addEventListener('input', () => {
   const conf = setting(state.dialogIndex); conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
   conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
   if (id === 'effect') conf.smooth = smoothEffects.includes(conf.effect);
+  if (id === 'release') conf.release_duration = Number($('release').value)/24;
   if (id === 'smooth') conf.smooth = $('smooth').value === 'smooth';
   if (id === 'ending') conf.ending = $('ending').value;
   clampMotion(state.dialogIndex); invalidate(); draw(); updateDialog();
@@ -225,13 +235,14 @@ async function waitForJob(id) {
   }
 }
 async function assemble(download = false, transitionIndex = null) {
+  if (transitionIndex !== null) return previewTransition(transitionIndex);
   if (state.busy || !state.clips.length) return;
   error(); busy(true);
   const prepared = Boolean(state.ready);
   try {
     if (!state.ready) {
       $('progress').hidden = false; $('progress').value = 0; status('Preparing sequence…');
-      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(c => c.id), transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
+      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(c => c.id), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
       state.job = job.id;
       try { sessionStorage.setItem('h4-job', job.id); } catch {}
       state.ready = await waitForJob(job.id);
@@ -251,8 +262,63 @@ async function assemble(download = false, transitionIndex = null) {
   } catch (e) { error(e.message); status('Processing failed. Adjust the sequence or retry.'); }
   finally { busy(false); $('progress').hidden = true; }
 }
+$('sound').onchange=()=>{
+  state.sound=$('sound').checked; player.muted=!state.sound;
+  $('sound-label').textContent=state.sound ? 'Sound on' : 'Sound off';
+  if (!state.sound) $('motion-preview').muted=true;
+  try { sessionStorage.setItem('h4-audio',JSON.stringify(state.sound)); } catch {}
+  invalidate();
+  status(state.sound ? 'Sound on · original audio in preview and export.' : 'Sound off · preview and export are silent.');
+};
 $('assemble').onclick = () => assemble(); $('export').onclick = () => assemble(true);
+async function previewTransition(index, smoothOverride = null) {
+  if (state.busy) return;
+  if (state.ready && smoothOverride === null) {
+    showResult(state.ready);
+    const boundary = state.ready.result.boundaries[index];
+    seek(Math.max(0, boundary.frame/24-.75), boundary.frame/24+boundary.duration+.75);
+    status('Transition preview · cached assembled video · verified full decode.');
+    return;
+  }
+  const transitions = state.clips.slice(1).map((_,i)=>({...setting(i)}));
+  if (smoothOverride !== null) transitions[index].smooth = smoothOverride;
+  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>c.id),transitions:transitions.slice(0,index+1),index});
+  error(); busy(true);
+  try {
+    let result = transitionCache.get(key);
+    if (!result) {
+      status('Preparing short transition preview…');
+      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(c=>c.id),transitions,audio:state.sound,preview_boundary:index})});
+      result = await waitForJob(job.id);
+      if (transitionCache.size >= 12) transitionCache.delete(transitionCache.keys().next().value);
+      transitionCache.set(key,result);
+    }
+    state.previewEnd = null;
+    source(result.url, `Transition preview · ${names[transitions[index].effect]}${smoothOverride === null ? '' : smoothOverride ? ' · Gentler' : ' · Original'}`);
+    seek(0,null);
+    status(`Ready · short preview ${result.result.duration.toFixed(2)}s · verified full decode. Assemble preview or Export MP4 uses the complete sequence.`);
+  } catch(e) { error(e.message); status('Transition preview failed. Retry or assemble the sequence.'); }
+  finally { busy(false); $('progress').hidden=true; }
+}
+for (const [id,gentle] of [['compare-original',false],['compare-gentler',true]]) $(id).onclick=()=>{
+  const index=state.dialogIndex; $('transition-dialog').close(); previewTransition(index,gentle);
+};
+$('mark-motion-start').onclick=()=>{
+  const index=state.dialogIndex, conf=setting(index);
+  conf.motion_start=Math.max(0,Math.round($('motion-preview').currentTime*24)-1)/24;
+  clampMotion(index); invalidate(); draw(); updateDialog();
+};
+$('mark-motion-end').onclick=()=>{
+  const index=state.dialogIndex, conf=setting(index);
+  const frames=Math.round($('motion-preview').currentTime*24)-Math.round(conf.motion_start*24);
+  if (frames<2 || frames>48) { error('Choose an end after the start, within 2 seconds.'); return; }
+  error(); conf.loop_frames=frames;
+  conf.duration=Math.max(conf.duration,(frames+1)/24);
+  clampMotion(index); invalidate(); draw(); updateDialog();
+};
 $('preview-transition').onclick = () => { const index = state.dialogIndex; $('transition-dialog').close(); assemble(false, index); };
+$('motion-preview').addEventListener('volumechange',()=>{if (!state.sound && !$('motion-preview').muted) $('motion-preview').muted=true;});
+player.addEventListener('volumechange',()=>{if (!state.sound && !player.muted) player.muted=true;});
 player.addEventListener('loadedmetadata', () => { $('time').textContent = `${player.currentTime.toFixed(2)} / ${(Number.isFinite(player.duration) ? player.duration : 0).toFixed(2)} s`; });
 player.addEventListener('timeupdate', () => {
   $('time').textContent = `${player.currentTime.toFixed(2)} / ${(Number.isFinite(player.duration) ? player.duration : 0).toFixed(2)} s`;
@@ -269,6 +335,9 @@ window.addEventListener('beforeunload', () => { $('motion-preview').pause(); $('
 async function restore() {
   busy(true);
   try {
+    state.sound=sessionStorage.getItem('h4-audio') !== 'false';
+    $('sound').checked=state.sound; player.muted=!state.sound;
+    $('sound-label').textContent=state.sound ? 'Sound on' : 'Sound off';
     const savedJob = sessionStorage.getItem('h4-job');
     const [data, connection] = await Promise.all([request('/api/clips'), request('/api/connection').catch(() => ({phone_url: null}))]);
     state.phoneUrl = connection.phone_url; $('phone-info').hidden = !state.phoneUrl;

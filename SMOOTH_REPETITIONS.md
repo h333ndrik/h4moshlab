@@ -72,3 +72,9 @@ The common effect and sequence APIs accept boolean `smooth` (default false).
 The standalone pair API ends at the effect; use the full sequence comparison to
 inspect its exit. Unsupported effect/parameter combinations are rejected by the
 pair API. Private comparison footage/audio stays ignored and is not published.
+
+## Adjustable release update
+
+The previously fixed-quarter release is now the default of an optional
+release_duration parameter. The dialog exposes 1 frame through half the effect.
+It guarantees a minimum uninterrupted tail; see TRANSITION_WORKFLOW.md.

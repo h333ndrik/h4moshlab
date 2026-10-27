@@ -22,3 +22,7 @@ dialog .section-label{position:sticky;top:0;background:#f8f8f6;z-index:1}
 .h4-cursor.is-clickable img{transform:rotate(0deg)}
 @media(hover:hover) and (pointer:fine){html.h4-cursor-ready,html.h4-cursor-ready *{cursor:none!important}}
 @media(prefers-reduced-motion:reduce){.h4-cursor img{transition:none}}
+
+.comparison-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.comparison-actions button{flex:1}#compare-control{margin-top:14px;font-size:12px}#compare-control summary{cursor:pointer}
+
+.preview-options{display:flex;align-items:center;gap:16px}.sound-toggle{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}.sound-toggle input{margin:0;accent-color:#555}@media(max-width:600px){.preview-meta{align-items:flex-start}.preview-options{flex-wrap:wrap;justify-content:flex-end;gap:8px}}@media(pointer:coarse){.sound-toggle{min-height:44px}}

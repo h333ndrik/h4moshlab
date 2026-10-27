@@ -155,3 +155,5 @@ endpoint that accepts two uploaded file paths and returns the rendered MP4.
 [Progressive Melt and Motion Stutter: methods, parameters and comparison](DYNAMIC_EFFECTS.md)
 
 [Gentler repetitions: bounded motion jumps, unchanged audio/timing](SMOOTH_REPETITIONS.md)
+
+[Reset Pulse, short previews, release, A/B comparison and motion marks](TRANSITION_WORKFLOW.md)

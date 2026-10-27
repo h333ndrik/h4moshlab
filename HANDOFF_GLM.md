@@ -133,3 +133,42 @@ Nutzer hat ausdrücklich dunkle/negative Designvariante gewünscht: schwarzer Hi
 
 Nutzer hat das dunkle Experiment zurückgenommen. web/style.css auf helle Version
 aus379fb37 zurückgestellt. Effekte, Cursor(-25/0), Favicon und Layout unverändert.
+
+## Aktueller Abschluss: Reset Pulse und einfache Übergangskontrolle
+
+Reset Pulse als siebter Mosh-Modus implementiert (plus Cut). Kopiert periodisch
+das erste I-VOP des eingehenden Videos und verzerrt es danach mit wiederholten
+P-VOPs; kein Fotoimport. Absichtliche klare Blitze, kein Smoothness-Versprechen.
+Details TRANSITION_WORKFLOW.md. API release_duration für Gentler ergänzt;
+Standard bleibt Viertel, bis halbe Effektdauer einstellbar. Vergleich Original/
+Gentler einklappbar und ohne Veränderung gespeicherter Übergangseinstellungen.
+Motion Loop: Start/Ende direkt an nativen Quellvideo-Playhead markieren.
+
+Kurze Vorschau über optional preview_boundary in POST /api/jobs. Präfix bleibt
+für Codec-Referenzen erhalten, kodiert werden nur .75s davor + Effekt + .75s
+danach. Folgende Clips werden ausgelassen. Eigene Browser-Cacheeinträge,
+Assemble/Export und gespeicherter Gesamtjob bleiben getrennt. Bei bereits
+vorhandener Gesamtdatei wird deren Ausschnitt wiederverwendet. Vorlaufdekodierung
+kann weiterhin Zeit kosten; kein pauschales Geschwindigkeitsversprechen.
+
+Nutzerzusatz: Sound on/off als kleiner Checkbox-Schalter neben Player. Default an,
+Auswahl in SessionStorage h4-audio. Off erzwingt stumme Quell-/Kurzvorschau und
+exportiert MP4 ohne Tonspur; On Originalton. API audio boolean default true;
+sequence.render include_audio default true. Audioflag ist Teil des Vorschau-
+Cachekeys; Umschalten invalidiert alten Gesamtexport. Keine Audio-Mosh-Effekte.
+
+35 Integrationstests im vollständigen letzten Lauf bestanden (99.869s).
+Neuer Browser-Test für Reset Pulse, Kurzvorschau, A/B-Cache, Release und Motion-
+Marks mit Original-MOVs bestanden. Sound-Test mit beiden Original-MOVs inklusive
+stummem MP4, Reload und erneut aktiviertem Ton bestanden. Bisheriger kompletter
+Browser-Smoke erneut bestanden, keine JS-Fehler. Expliziter Soundlabel-/Mute-
+Fallback und schmale Ansicht ebenfalls geprüft. Ausgabevideo mit echten MOVs:
+159 Frames komplett vs84 kurz, Resetoffsets11/23/35/47, Originalton vorhanden,
+Full Decode bestanden. Repräsentative Resetbilder lokal visuell geprüft.
+
+Während Entwicklung gefundene Preview-Audio-/Zeittaktprobleme behoben: Ausgabefilter
+trimmt samplegenau, -t statt -frames:v für muxierten Previewexport, setpts auf
+N/(24*TB) plus explizite Ausgabe24fps für Preview/Reset Pulse. Finaler Testlauf
+prüft jetzt auch Videodauer passend zur Framezahl. Private Medien bleiben lokal.
+Öffentliche Screenshotreferenz demo/editor/reset-pulse.png enthält nur synthetische
+Samples. Helles Design, Cursor(-25/0), h4-Favicon und Tabtitel mosh lab erhalten.
