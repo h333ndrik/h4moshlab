@@ -89,3 +89,10 @@ off-white type, gray video well, charcoal cards/dialog and light primary export.
 Keep existing typography, dimensions, structure, cursor and features. This is
 a requested visual experiment; do not assume final user approval of this palette.
 The prior light layout remains available in Git before this experiment.
+
+## Current approved palette: light again
+
+The user reverted the dark experiment. Use the original white/light background
+with its subtle gray gradient, dark text and original light cards/settings.
+Keep all effects, cursor angles (-25/0), favicon and layout. The dark screenshot
+is historical, not the current design reference.

@@ -128,3 +128,8 @@ Abschluss Glättung: neuer Browserlauf tests/browser_dynamic.py für alle3 gegl�
 ## Aktuelles Designexperiment
 
 Nutzer hat ausdrücklich dunkle/negative Designvariante gewünscht: schwarzer Hintergrund, helle Schrift, graues Videofeld. Palette in web/style.css angepasst, natives color-scheme dark. Layout/Engine/Cursor unverändert. Noch keine endgültige Nutzerabnahme. Screenshot demo/editor/dark.png. Browser-Dynamic-Smoke mit echtem Render/Export bestanden, leere/gefüllte Desktop-/schmale Ansicht und Modal visuell geprüft; kein Seitenoverflow bei320/390/600/1200px. Letzter Nutzer fragte nach Öffnen: im entpackten Projekt eval Homebrew shellenv, python3 tools/server.py --port 8770, Mac-Browser http://127.0.0.1:8770, Terminal offenlassen.
+
+## Aktuell wieder hell
+
+Nutzer hat das dunkle Experiment zurückgenommen. web/style.css auf helle Version
+aus379fb37 zurückgestellt. Effekte, Cursor(-25/0), Favicon und Layout unverändert.

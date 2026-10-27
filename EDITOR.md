@@ -208,3 +208,6 @@ gray video well, off-white text, charcoal cards/settings and light export button
 Layout, type, cursor and processing behavior are unchanged. Prior light design
 is available in Git before this experiment. Reference: demo/editor/dark.png.
 Browser effect/export flow and widths 320–1200px were checked.
+
+The user subsequently reverted the dark experiment: the current palette is the
+original light background and subtle gray gradient. dark.png is historical.
