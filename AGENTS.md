@@ -72,3 +72,6 @@ effects. Progressive Melt and Motion Stutter use compressed P-VOP scheduling,
 not new motion-vector editing algorithms. See DYNAMIC_EFFECTS.md. Keep honest
 limits: minimum 0.5 seconds, motion_start=0, original audio unchanged, and
 block-boundary jumps may persist despite a consecutive prediction tail.
+
+Browser tab title: exactly `mosh lab` in lowercase, without h4 (already in
+the favicon). The page heading stays `h4 mosh lab`.
