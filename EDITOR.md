@@ -195,7 +195,7 @@ ending selection/persistence, and default flow reaching the actual output.
 
 The original cursor artwork from the supplied h4ngelic HTML preview is served
 locally as web/h4-cursor.svg. Desktop mouse only: 22x33 pixels, black with a white
-outline, -15 degrees at rest and +15 over enabled interactive controls, with a
+outline, -25 degrees at rest and 0 degrees over enabled interactive controls, with a
 180ms rotation. Reduced-motion mode removes the animation. Native video controls,
 touch input and asset-load failures retain the native pointer.
 Optional Chromium validation: `python3 tests/browser_cursor.py` with the server

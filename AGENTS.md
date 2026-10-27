@@ -6,9 +6,8 @@ When planning the next UI/design refinement, proactively remind the user of this
 requested feature. The user has now requested implementation and supplied the original artwork.
 
 - Use the branded H4 mouse cursor.
-- At rest, rotate it approximately 15 degrees to the left (-15deg).
-- When hovering over an enabled clickable element, rotate it approximately
-  15 degrees to the right (+15deg).
+- At rest, rotate it 25 degrees to the left (-25deg).
+- When hovering over an enabled clickable element, rotate it to the upright position (0deg).
 - The angle change signals that the element can be clicked. Do not invent the
   cursor artwork; use the user's H4 cursor asset when implementing this later.
 
@@ -37,7 +36,7 @@ demo/editor/desktop.png is the accompanying visual reference.
   duplicate "Download assembled MP4" link or add separate full-sequence/clip tabs.
 - Preserve the existing responsive spacing and horizontally scrolling timeline.
 - The original H4 cursor is implemented separately in web/cursor.js and
-  web/h4-cursor.svg; preserve its small monochrome form and smooth -15/+15 rotation.
+  web/h4-cursor.svg; preserve its small monochrome form and smooth -25/0 rotation.
 
 ## Platform direction
 
@@ -52,8 +51,8 @@ without a running Mac is a long-term goal, not the current deployment scope.
 
 Prioritize effect improvements and new video-only codec effects before mobile work.
 After effect work, implement the original h4ngelic cursor if its asset is available:
-black and white, slightly smaller, resting at -15 degrees, smoothly rotating to
-+15 degrees over enabled clickable controls. Other chat history is unavailable;
+black and white, slightly smaller, resting at -25 degrees, smoothly rotating to
+0 degrees over enabled clickable controls. Other chat history is unavailable;
 ask for the original asset if it cannot be found instead of inventing its shape.
 
 Cursor artwork extracted from the user-supplied h4ngelic-preview (5).html.

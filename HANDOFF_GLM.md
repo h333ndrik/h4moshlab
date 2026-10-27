@@ -108,3 +108,7 @@ Effektarbeit wurde priorisiert. Loop Release ist inzwischen als neuer MPEG-4-P-F
 ## Cursor umgesetzt
 
 Original-H4-SVG aus hochgeladener h4ngelic-preview (5).html extrahiert. web/h4-cursor.svg, web/cursor.js, CSS und feste Serverrouten implementiert: 22x33px, schwarz/weiße Kontur, -15/+15 Grad mit 180ms ease-out. Touch/Video/native Fallback, reduzierte Bewegung, Modal und deaktivierte Controls berücksichtigt. tests/browser_cursor.py ist erfolgreich gelaufen; Screenshot work/h4-cursor.png visuell geprüft. Frühere Aussagen zum fehlenden Asset sind überholt.
+
+## Aktuelle Cursorwinkel (ersetzt vorherige Angaben)
+
+Nutzerkorrektur: Ruhelage -25 Grad, über aktivierter Klickmöglichkeit 0 Grad. Weiche Rotation und Größe unverändert.
