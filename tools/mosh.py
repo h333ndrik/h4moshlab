@@ -33,7 +33,7 @@ def vops(path):
 def normalize(source, destination, max_seconds=6):
     """Shared, unchanged Phase 1 normalization; never edit the source."""
     run('ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', source, *(['-t', str(max_seconds)] if max_seconds is not None else []), '-an',
-        '-vf', f'scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
+        '-vf', f'setpts=PTS-STARTPTS,scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
         '-c:v', 'mpeg4', '-threads', '2', '-q:v', '4', '-g', '10000', '-bf', '0', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-f', 'm4v', destination)
 

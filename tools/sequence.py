@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 from effects import EFFECTS, prediction_plan
+from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args
 from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
 
 FPS = 24
@@ -24,11 +25,12 @@ def prepare(source, directory):
     header, packets = vops(normalized)
     if len(packets) < 2 or [p[4] >> 6 for p in packets] != [0]+[1]*(len(packets)-1):
         raise ValueError('Video must normalize to at least two I/P frames.')
+    audio = prepare_audio(source, metadata, len(packets), directory, FPS)
     preview = directory/'preview.mp4'
-    run('ffmpeg', '-v', 'error', '-y', '-r', FPS, '-i', normalized, '-an',
+    run('ffmpeg', '-v', 'error', '-y', '-r', FPS, '-i', normalized, *encoding_args(audio),
         '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', preview)
     run('ffmpeg', '-v', 'error', '-y', '-i', preview, '-frames:v', '1', directory/'thumb.jpg')
-    return {'source': str(source), 'normalized': str(normalized), 'preview': str(preview),
+    return {'source': str(source), 'normalized': str(normalized), 'preview': str(preview), 'audio': audio,
             'frames': len(packets), 'duration': len(packets)/FPS, 'sha256': digest(Path(source))}
 
 
@@ -100,16 +102,20 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
                 expected += len(packets)-1
             progress(f'Assembled clip {i+1}/{len(clips)}', .35*(i+1)/len(clips))
     run('ffmpeg', '-v', 'error', '-xerror', '-r', FPS, '-i', stream, '-f', 'null', '-')
+    progress('Assembling original audio', .36)
+    audio, audio_samples = assemble_audio(clips, transitions, directory, FPS)
+    if audio and audio_samples != expected*SAMPLE_RATE//FPS:
+        raise RuntimeError('Audio and video timelines do not match.')
     output = directory/'sequence.mp4'
     command = ['ffmpeg', '-v', 'error', '-nostdin', '-y', '-r', str(FPS), '-i', str(stream),
-               '-an', '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p',
+               *encoding_args(audio), '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p',
                '-movflags', '+faststart', '-progress', 'pipe:1', str(output)]
     with (directory/'encode.log').open('w+') as log:
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=log, text=True) as process:
             for line in process.stdout:
                 if line.startswith('out_time_us='):
                     try:
-                        fraction = min(.95, .35+.6*int(line.split('=')[1])/(expected/FPS*1e6))
+                        fraction = min(.95, .36+.59*int(line.split('=')[1])/(expected/FPS*1e6))
                         progress('Encoding assembled video', fraction)
                     except ValueError:
                         pass
@@ -121,11 +127,17 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
     metadata = probe(output)
     if int(metadata['streams'][0]['nb_frames']) != expected:
         raise RuntimeError('Output frame count mismatch.')
+    audio_streams = [s for s in metadata['streams'] if s['codec_type'] == 'audio']
+    if bool(audio_streams) != bool(audio):
+        raise RuntimeError('Output audio stream is missing or unexpected.')
+    if audio and abs(float(audio_streams[0]['duration'])-expected/FPS) > .002:
+        raise RuntimeError('Encoded audio duration does not match video.')
     if any(digest(Path(c['source'])) != c['sha256'] for c in clips):
         raise RuntimeError('An input changed during rendering.')
     report = {'frames': expected, 'duration': expected/FPS, 'boundaries': boundaries,
               'source_sha256': [c['sha256'] for c in clips], 'full_decode': 'passed',
-              'size': f'{WIDTH}x{HEIGHT}', 'fps': FPS, 'audio': False}
+              'size': f'{WIDTH}x{HEIGHT}', 'fps': FPS, 'audio': bool(audio),
+              'audio_samples': audio_samples, 'audio_sample_rate': SAMPLE_RATE if audio else None}
     (directory/'verification.json').write_text(json.dumps(report, indent=2)+'\n')
     progress('Ready', 1)
     return report

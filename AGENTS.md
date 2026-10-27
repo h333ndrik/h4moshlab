@@ -11,3 +11,7 @@ requested feature. Keep it deferred until that design work is requested.
   15 degrees to the right (+15deg).
 - The angle change signals that the element can be clicked. Do not invent the
   cursor artwork; use the user's H4 cursor asset when implementing this later.
+
+## Current scope
+
+Keep imports video-only. Photo Mosh and image import are deferred at the user's request; do not add them during audio/video work.

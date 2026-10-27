@@ -90,8 +90,9 @@ Each mosh boundary drops one source frame (B's initial I-frame), as in Phase 1.
 The rest of the clip remains; Selecting Restore clear image may visibly jump to normal B when its window
 ends; Continue motion avoids that forced reset but does not guarantee a clean
 final image or perfectly smooth motion on every source. A normal cut drops no frames.
-Outputs are silent 640×480/24fps with preserved aspect ratio. Audio and
-selectable higher-resolution exports are not implemented. This limitation is displayed in the interface.
+Outputs are 640×480/24fps with preserved aspect ratio and original sound when
+available (AAC, 48kHz stereo). Mixed silent clips are padded to keep timing exact.
+[Audio behavior and tests](AUDIO.md). Selectable higher-resolution exports are not implemented. This limitation is displayed in the interface.
 
 Private originals, normalized clips, reference-restoration streams, render logs,
 VOP indices/payload hashes and verification JSON live under ignored
@@ -112,7 +113,7 @@ python3 -m unittest discover -s tests -v
 node --check web/app.js  # Optional JS syntax check when Node is available.
 ```
 
-Eighteen integration tests passed: all six original effect regressions plus full-clip
+Twenty-two integration tests passed: all six original effect regressions plus full-clip
 sequencing, multiple real boundaries, normal-reference restoration, no-reset release payloads, clean cuts after release, cut reordering,
 one-clip exports and invalid requests. The >6s fixture confirms no editor truncation. Missing-tool tests check startup
 diagnostics, actionable import errors, cleanup and retry after a failed import.
@@ -145,7 +146,7 @@ three-clip render with two effect boundaries, zero JavaScript errors, complete d
 - `tests/test_sequence.py`, `tests/browser_smoke.py`: sequence and real-browser coverage.
 
 Next recommended task: run this flow on the target Apple Silicon Mac/Safari with
-real footage, then set the required output resolution/audio behavior before applying
+real footage, then review output quality and source-audio playback before applying
 the final h4ngelic design. Motion Loop is verified; Motion Transfer remains unavailable for the reasons in
 [PHASE2.md](PHASE2.md); it is not exposed as a working effect.
 

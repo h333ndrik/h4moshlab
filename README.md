@@ -21,6 +21,9 @@ python3 tools/server.py --port 8765
 New processing, previews and exports use **640×480 at 24fps**. Existing demo
 files below are historical 320×240 renders; re-import and render to use the new size.
 
+[Original audio now follows previews and exports](AUDIO.md), including silent
+gaps and matching clip order.
+
 No frontend build or extra runtime dependencies. The simple styling can be refined later.
 
 Phase 2 adds a verified Frame Melt mode and a common local API while preserving

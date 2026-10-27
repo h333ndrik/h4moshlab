@@ -8,6 +8,7 @@ import re
 import hashlib
 import sys
 import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from playwright.sync_api import sync_playwright, expect
@@ -19,6 +20,7 @@ if len(files) < 3:
 artifacts = ROOT/'work/browser-smoke'
 artifacts.mkdir(parents=True, exist_ok=True)
 base = os.environ.get('H4_EDITOR_TEST_URL', 'http://127.0.0.1:8765')
+expected_audio = any(json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','a:0','-show_entries','stream=codec_name','-of','json',f]))['streams'] for f in files[:3])
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=shutil.which('chromium'))
     page = browser.new_page(viewport={'width': 1200, 'height': 1000}, accept_downloads=True)
@@ -89,6 +91,12 @@ with sync_playwright() as p:
     assert report['boundaries'][1]['ending'] == 'reset'
     assert report['boundaries'][0]['b_vop_indices'] == [13+i%6 for i in range(24)]
     assert report['boundaries'][1]['b_vop_indices'] == list(range(7,19))
+    assert report['audio'] == expected_audio
+    if expected_audio:
+        assert report['audio_samples'] == report['frames']*2000
+        decoded = page.locator('#player').evaluate('(v) => typeof v.webkitAudioDecodedByteCount === "number" ? v.webkitAudioDecodedByteCount : null')
+        if decoded is not None:
+            assert decoded > 0
     assert report['source_sha256'] == [hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in files[:3]]
     # Returning from an individual clip must reuse the complete render and position.
     page.locator('#player').evaluate('(v) => {v.pause(); v.currentTime=1.1}')
@@ -120,6 +128,9 @@ with sync_playwright() as p:
         page.locator('#export').click()
     event.value.save_as(artifacts/'sequence.mp4')
     assert (artifacts/'sequence.mp4').stat().st_size > 1000
+    exported = json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(artifacts/'sequence.mp4')]))['streams']
+    assert any(s['codec_type']=='audio' for s in exported) == expected_audio
+    subprocess.run(['ffmpeg','-v','error','-xerror','-i',str(artifacts/'sequence.mp4'),'-f','null','-'],check=True)
     expect(page.get_by_text('Download assembled MP4', exact=True)).to_have_count(0)
     expect(page.locator('a[download]')).to_have_count(0)
     with urllib.request.urlopen(base+url) as response:
