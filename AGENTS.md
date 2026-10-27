@@ -119,3 +119,15 @@ Do not call current lossy delivery lossless or maximum source resolution.
 Undo/redo, saved projects, tested effect presets and BPM alignment interest the
 user; start with undo/redo and effect presets when implementing the next phase.
 These are ideas/priorities, not yet implemented capabilities.
+
+## Permanent save point: h4 moshlab blueprint 1
+
+The user named the current website/application state `h4 moshlab blueprint 1`.
+Preserve the immutable Git tag `h4-moshlab-blueprint-1`; never move or overwrite it.
+See blueprints/blueprint-1.md for included features, restore instructions and
+limits (no private footage or temporary editing sessions in Git). Future changes
+continue separately so the user can return to this exact baseline.
+
+BPM alignment to music is now a desired next feature, especially for pulse,
+stutter and loop timing. It is not implemented yet. Keep the UI simple and do not
+claim automatic beat detection or music synchronization before it is built/tested.

@@ -172,3 +172,11 @@ N/(24*TB) plus explizite Ausgabe24fps für Preview/Reset Pulse. Finaler Testlauf
 prüft jetzt auch Videodauer passend zur Framezahl. Private Medien bleiben lokal.
 Öffentliche Screenshotreferenz demo/editor/reset-pulse.png enthält nur synthetische
 Samples. Helles Design, Cursor(-25/0), h4-Favicon und Tabtitel mosh lab erhalten.
+
+## Permanent snapshot: h4 moshlab blueprint 1
+
+User requested an explicit save point of the current light website/application.
+Immutable tag: h4-moshlab-blueprint-1. See blueprints/blueprint-1.md for restoration
+and scope. Application baseline is a4f2186; snapshot documentation changes no
+application code. Never move this tag. BPM alignment to music is the next desired
+direction, not an implemented feature. No private footage or session data saved.

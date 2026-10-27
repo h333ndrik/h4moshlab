@@ -157,3 +157,5 @@ endpoint that accepts two uploaded file paths and returns the rendered MP4.
 [Gentler repetitions: bounded motion jumps, unchanged audio/timing](SMOOTH_REPETITIONS.md)
 
 [Reset Pulse, short previews, release, A/B comparison and motion marks](TRANSITION_WORKFLOW.md)
+
+[**h4 moshlab blueprint 1 — permanent save point and restoration**](blueprints/blueprint-1.md)
