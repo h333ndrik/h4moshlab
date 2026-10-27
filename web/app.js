@@ -2,8 +2,9 @@
 const $ = id => document.getElementById(id);
 const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
-const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
-const notes = {'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
+const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter'];
+const names = {'progressive-melt': 'Progressive Melt', 'motion-stutter': 'Motion Stutter', 'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
+const notes = {'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
 const touchUI = () => window.matchMedia('(pointer:coarse)').matches;
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
@@ -46,7 +47,7 @@ function draw() {
       const conf = setting(index - 1);
       const connector = button('', () => openTransition(index - 1), `Transition ${index}: ${names[conf.effect]}`);
       const method = document.createElement('span');
-      method.textContent = conf.effect === 'cut' ? 'Cut' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'loop-release' ? 'Release' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
+      method.textContent = conf.effect === 'cut' ? 'Cut' : conf.effect === 'progressive-melt' ? 'Progressive' : conf.effect === 'motion-stutter' ? 'Stutter' : conf.effect === 'frame-melt' ? 'Melt' : conf.effect === 'loop-release' ? 'Release' : conf.effect === 'motion-loop' ? 'Loop' : 'Mosh';
       const time = document.createElement('span'); time.textContent = conf.effect === 'cut' ? '—' : `${conf.duration.toFixed(2)} s`;
       connector.className = 'connector'; connector.append(method, time); timeline.append(connector);
     }
@@ -118,20 +119,20 @@ $('files').onchange = async event => {
 };
 function clampMotion(index) {
   const conf = setting(index), available = state.clips[index + 1].frames - 1;
-  const minimum = conf.effect === 'loop-release' ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
+  const minimum = alignedEffects.includes(conf.effect) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
   const count = Math.max(minimum, Math.min(144, available, Math.round(conf.duration * 24)));
   conf.duration = count / 24;
   conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
-  conf.loop_frames = Math.max(2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
-  const needed = conf.effect === 'loop-release' ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
-  const maximum = conf.effect === 'loop-release' ? 0 : Math.max(0, available - needed);
+  conf.loop_frames = Math.max(conf.effect === 'motion-stutter' ? 4 : 2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
+  const needed = alignedEffects.includes(conf.effect) ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
+  const maximum = alignedEffects.includes(conf.effect) ? 0 : Math.max(0, available - needed);
   conf.motion_start = Math.max(0, Math.min(maximum, Math.round(conf.motion_start * 24))) / 24;
   return {conf, count, needed, maximum};
 }
 function openTransition(index) {
   state.dialogIndex = index;
   $('transition-pair').textContent = `${state.clips[index].name} → ${state.clips[index + 1].name}`;
-  for (const mode of ['motion-loop', 'loop-release']) $('effect').querySelector(`[value="${mode}"]`).disabled = state.clips[index + 1].frames < (mode === 'loop-release' ? 13 : 4);
+  for (const mode of ['motion-loop', ...alignedEffects]) $('effect').querySelector(`[value="${mode}"]`).disabled = state.clips[index + 1].frames < (alignedEffects.includes(mode) ? 13 : 4);
   updateDialog(); $('transition-dialog').showModal();
 }
 function motionFrame(play = false) {
@@ -158,20 +159,24 @@ function motionFrame(play = false) {
 function updateDialog() {
   const {conf, needed, maximum} = clampMotion(state.dialogIndex);
   $('effect').value = conf.effect;
-  const ending = conf.ending ?? (['frame-melt', 'motion-loop', 'loop-release'].includes(conf.effect) ? 'flow' : 'reset');
+  const ending = conf.ending ?? (['frame-melt', 'motion-loop', ...alignedEffects].includes(conf.effect) ? 'flow' : 'reset');
   $('ending').value = ending;
   $('ending-control').hidden = conf.effect === 'cut';
   $('duration-note').textContent = ending === 'flow' ? 'After this duration, normal motion continues without a hard image reset. Distortion can persist.' : 'After this duration, the clear incoming picture is restored. This can create a visible jump.';
-  $('duration').min = conf.effect === 'loop-release' ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
+  $('duration').min = alignedEffects.includes(conf.effect) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
   $('duration').max = Math.min(144, state.clips[state.dialogIndex + 1].frames - 1);
   $('duration').value = Math.round(conf.duration * 24);
   $('repeat').value = conf.repeat;
+  document.querySelector('label[for="loop-length"]').firstChild.textContent = conf.effect === 'motion-stutter' ? 'Pulse length ' : 'Loop length ';
+  document.querySelector('label[for="repeat"]').firstChild.textContent = conf.effect === 'progressive-melt' ? 'Initial P-frame repetitions ' : 'P-frame repetitions ';
+  $('loop-length').min = conf.effect === 'motion-stutter' ? 4 : 2;
+  document.querySelector('#loop-control .hint').textContent = conf.effect === 'motion-stutter' ? 'Pulse length: each pulse starts with a repeated prediction frame, then continues motion. The final quarter releases the stutter.' : 'A short motion sequence is repeated, pulling the previous image further each time.';
   $('loop-length').max = Math.min(48, Math.round(conf.duration * 24) - 1, state.clips[state.dialogIndex + 1].frames - 1);
   $('loop-length').value = conf.loop_frames;
   $('motion-start').max = maximum; $('motion-start').value = Math.round(conf.motion_start * 24);
   $('motion-start').disabled = maximum === 0;
-  $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = conf.effect !== 'frame-melt';
-  $('loop-control').hidden = !['motion-loop', 'loop-release'].includes(conf.effect); $('motion-control').hidden = conf.effect === 'cut';
+  $('duration-control').hidden = conf.effect === 'cut'; $('repeat-control').hidden = !['frame-melt', 'progressive-melt'].includes(conf.effect);
+  $('loop-control').hidden = !['motion-loop', 'loop-release', 'motion-stutter'].includes(conf.effect); $('motion-control').hidden = conf.effect === 'cut';
   $('method-note').textContent = notes[conf.effect]; $('duration-value').value = `${conf.duration.toFixed(2)} s`;
   $('repeat-value').value = `${conf.repeat}×`; $('loop-value').value = `${(conf.loop_frames / 24).toFixed(2)} s`;
   const start = conf.motion_start + 1 / 24;

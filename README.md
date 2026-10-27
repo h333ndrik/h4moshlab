@@ -151,3 +151,5 @@ Next phase, only after reviewing the render: call this CLI from one local server
 endpoint that accepts two uploaded file paths and returns the rendered MP4.
 
 [Loop Release: codec-level loop exit and reproducible comparison](LOOP_RELEASE.md)
+
+[Progressive Melt and Motion Stutter: methods, parameters and comparison](DYNAMIC_EFFECTS.md)

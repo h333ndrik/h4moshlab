@@ -64,3 +64,11 @@ touch devices and video controls; honor reduced-motion preferences.
 Use the clean bold lowercase h4 wordmark for the favicon (web/favicon.svg and
 32px PNG fallback), dark text on the existing light background. The tab icon is
 separate from the ornamental H4 mouse cursor. Keep the approved page layout.
+
+## Effect development priority
+
+Website linking/hosting and mobile remain deferred; focus on verified video
+effects. Progressive Melt and Motion Stutter use compressed P-VOP scheduling,
+not new motion-vector editing algorithms. See DYNAMIC_EFFECTS.md. Keep honest
+limits: minimum 0.5 seconds, motion_start=0, original audio unchanged, and
+block-boundary jumps may persist despite a consecutive prediction tail.

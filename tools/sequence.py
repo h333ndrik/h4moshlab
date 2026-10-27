@@ -35,7 +35,7 @@ def prepare(source, directory):
 
 
 def ending_mode(transition):
-    default = 'flow' if transition.get('effect') in ('frame-melt', 'motion-loop', 'loop-release') else 'reset'
+    default = 'flow' if transition.get('effect') in ('frame-melt', 'motion-loop', 'loop-release', 'progressive-melt', 'motion-stutter') else 'reset'
     ending = transition.get('ending', default)
     if ending not in ('flow', 'reset'):
         raise ValueError('Choose flow or reset for the effect ending.')

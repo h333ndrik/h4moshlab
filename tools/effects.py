@@ -9,6 +9,10 @@ from pathlib import Path
 from mosh import digest, normalize, probe, run, vops
 
 EFFECTS = {
+    'progressive-melt': {'parameters': {'motion_start': {'default': 0}, 'repeat': {'default': 4, 'min': 2, 'max': 12}},
+                         'method': 'Repeat timeline-anchored P-VOPs with decreasing repetition, then continue consecutive prediction frames.'},
+    'motion-stutter': {'parameters': {'motion_start': {'default': 0}, 'loop_frames': {'default': 12, 'min': 4, 'max': 48}},
+                       'method': 'Alternate repeated single P-VOP bursts with consecutive motion; finish with an uninterrupted prediction tail.'},
     'classic-mosh': {'parameters': {'motion_start': {'default': 0}}, 'method': 'Remove B I-VOP; append B P-VOPs unchanged.'},
     'frame-melt': {'parameters': {'motion_start': {'default': 0}, 'repeat': {'default': 4, 'min': 2, 'max': 12}},
                    'method': 'Remove B I-VOP; repeat compressed B P-VOPs against evolving references.'},
@@ -35,22 +39,37 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
     available = frame_count-1-offset
     if available < 1:
         raise ValueError('Motion start is outside the incoming clip.')
-    if effect == 'loop-release' and (offset != 0 or count < 12):
-        raise ValueError('Loop Release needs at least 0.5 seconds and motion_start=0 for a timeline-aligned exit.')
+    if effect in ('loop-release', 'progressive-melt', 'motion-stutter') and (offset != 0 or count < 12):
+        raise ValueError('This timeline-aligned effect needs at least 0.5 seconds and motion_start=0 for a timeline-aligned exit.')
     config = {'motion_start': offset/24}
-    if effect == 'frame-melt':
+    if effect in ('frame-melt', 'progressive-melt'):
         if type(repeat) is not int or not 2 <= repeat <= 12:
             raise ValueError('repeat must be an integer from 2 through 12')
         positions = [i//repeat for i in range(count)]
+        if effect == 'progressive-melt':
+            positions = []
+            while len(positions) < count:
+                start = len(positions)
+                remaining = max(0, 1 - start / max(1, count * .75))
+                repetitions = max(1, round(1 + (repeat - 1) * remaining * remaining))
+                release = count - max(2, count // 4)
+                repetitions = min(repetitions, release - start) if start < release else 1
+                positions.extend([start] * repetitions)
         config['repeat'] = repeat
-    elif effect in ('motion-loop', 'loop-release'):
+    elif effect in ('motion-loop', 'loop-release', 'motion-stutter'):
         if loop_frames is None:
             loop_frames = min(12, available, count-1)
         if type(loop_frames) is not int or not 2 <= loop_frames <= 48 or loop_frames >= count:
             raise ValueError('Choose 2–48 loop frames and an effect longer than one loop.')
         if loop_frames > available:
             raise ValueError('The selected motion loop extends beyond the incoming clip.')
+        if effect == 'motion-stutter' and loop_frames < 4:
+            raise ValueError('Motion Stutter needs 4–48 frames per pulse.')
         positions = [i % loop_frames for i in range(count)]
+        if effect == 'motion-stutter':
+            release = count - max(2, count // 4)
+            positions = [i - i % loop_frames if i < release and i % loop_frames < loop_frames // 2 else i
+                         for i in range(count)]
         if effect == 'loop-release':
             # Keep at least half the transition for uninterrupted normal motion.
             # Repeated blocks start at their output-timeline position; this skips
@@ -145,8 +164,8 @@ if __name__ == '__main__':
     parser.add_argument('--b', type=Path, required=True)
     parser.add_argument('--duration', type=float, required=True, help='Seconds of effect after A, rounded to 24fps')
     parser.add_argument('--motion-start', type=float, default=0, help='Seconds into B motion (first P-VOP = zero)')
-    parser.add_argument('--loop-frames', type=int, help='motion-loop only: size of the compressed prediction group')
-    parser.add_argument('--repeat', type=int, help='frame-melt only: compressed P-VOP repetition count')
+    parser.add_argument('--loop-frames', type=int, help='Loop/Release/Stutter: group or pulse size in frames')
+    parser.add_argument('--repeat', type=int, help='Frame/Progressive Melt: initial P-VOP repetition count')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     parameters = {'motion_start': args.motion_start}

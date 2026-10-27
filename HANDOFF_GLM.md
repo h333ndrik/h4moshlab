@@ -112,3 +112,9 @@ Original-H4-SVG aus hochgeladener h4ngelic-preview (5).html extrahiert. web/h4-c
 ## Aktuelle Cursorwinkel (ersetzt vorherige Angaben)
 
 Nutzerkorrektur: Ruhelage -25 Grad, über aktivierter Klickmöglichkeit 0 Grad. Weiche Rotation und Größe unverändert.
+
+## Neue Videoeffekte
+
+Progressive Melt und Motion Stutter sind in Engine und Dialog integriert, siehe DYNAMIC_EFFECTS.md. Nutzer hat Hosting/Verlinkung ausdrücklich vertagt. Progressive Melt reduziert P-VOP-Wiederholungen, Stutter wechselt Vorhersage-Bursts mit Vorwärtsbewegung. Beide enden mit zusammenhängenden Donorframes ohne Reset, benötigen mindestens 0.5s und motion_start=0. 29 Integrationstests bestanden; neue Browsernachweise gesondert prüfen. Keine Audio-Mosh- oder Shader-Effekte.
+
+Abschlussnachweis: tests/browser_dynamic.py bestanden (beide neuen Modi, echter Render, Export, Assemble-Rückkehr). Bestehender tests/browser_smoke.py mit zwei Original-MOVs und synthetischem Clip erneut bestanden, keine JavaScript-Fehler. Ein während Entwicklung gefundener falscher DOM-Selektor wurde korrigiert und beide Browserläufe danach erfolgreich wiederholt. Vergleich output/dynamic-effects-real/comparison.mp4 vollständig decodiert und during.png visuell geprüft. Private Medien nicht hochladen.
