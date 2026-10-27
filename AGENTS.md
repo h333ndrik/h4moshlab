@@ -58,3 +58,9 @@ ask for the original asset if it cannot be found instead of inventing its shape.
 Cursor artwork extracted from the user-supplied h4ngelic-preview (5).html.
 Use a 22x33px display size, black fill/white outline. Native pointer remains on
 touch devices and video controls; honor reduced-motion preferences.
+
+## Browser tab icon
+
+Use the clean bold lowercase h4 wordmark for the favicon (web/favicon.svg and
+32px PNG fallback), dark text on the existing light background. The tab icon is
+separate from the ornamental H4 mouse cursor. Keep the approved page layout.

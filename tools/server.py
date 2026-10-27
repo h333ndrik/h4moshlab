@@ -208,7 +208,7 @@ def handler_for(app):
                         file = app.root/identifier/'sequence.mp4'
                 if file:
                     return self.send_file(file, download='download' in urlsplit(self.path).query)
-            static = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/cursor.js': 'cursor.js', '/h4-cursor.svg': 'h4-cursor.svg'}
+            static = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/cursor.js': 'cursor.js', '/h4-cursor.svg': 'h4-cursor.svg', '/favicon.svg': 'favicon.svg', '/favicon.png': 'favicon.png'}
             if path in static:
                 return self.send_file(ROOT/'web'/static[path])
             self.send_json(404, {'error': 'Not found.'})
