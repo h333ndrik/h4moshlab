@@ -19,8 +19,10 @@ Select a connector, then choose a method:
   that continues to reshape the preceding image. It does not loop decoded images.
 - **Cut** is an ordinary cut and hides effect controls.
 
-Duration keeps its existing meaning: how long the effect occupies the start of
-the incoming clip before its normal picture is restored. Motion Loop exposes a
+Duration sets the Loop/Melt phase at the start of the incoming clip. After that,
+**Continue motion** (the new default for Loop/Melt) carries on with original P-frames
+without a hard image reset. **Restore clear image** is available when a clean
+recovery is wanted; it can produce a jump. Classic retains that recovery default. Motion Loop exposes a
 **Loop length** slider (2–48 frames, about 0.08–2s). The effect must be longer than
 one loop, so at least one motion frame is replayed. Very short incoming clips
 with fewer than three P-frames cannot use this mode.
@@ -32,10 +34,11 @@ the actual datamoshing instead. Available ranges stay within the clip and adjust
 to duration, repetition and loop length. Existing Classic/Melt settings retain
 their previous behavior when no new source offset is selected.
 
-Selecting motion does not trim/reorder the incoming clip. Its ordinary remainder
-still resumes at the existing timeline position after the effect; a visible reset
-can occur. There is no new reset scheduler, H.264 datamoshing implementation or
-independent motion-vector transfer in this release.
+Selecting motion does not trim/reorder the incoming clip. Its remainder
+still resumes at the existing timeline position after the effect. Flow retains the
+evolving reference; explicit reset restores a clean one. The ending option applies
+to sequence renders, not the standalone pair-proof CLI. There is no H.264
+datamoshing implementation or independent motion-vector transfer in this release.
 
 ## Processing API and exact reproduction
 
@@ -57,7 +60,8 @@ python3 tools/effects.py --effect motion-loop \
 no larger than the available donor window. The default adapts to shorter clips
 (up to 12 frames). `repeat` remains exclusive to Frame Melt. Unsupported parameters
 are rejected by the processing API. Sequence transition JSON accepts `effect`,
-`duration`, `motion_start`, plus the relevant `repeat` or `loop_frames` setting.
+`duration`, `motion_start`, plus the relevant `repeat` or `loop_frames` setting, and optional `ending`
+(`flow` or `reset`).
 
 The shared `prediction_plan` validates all indices before sequence assembly. With
 8 loop frames and the offset above, the donor order is 13…20, 13…20, …; each VOP's
@@ -69,7 +73,7 @@ retained in the ignored evidence directories.
 
 ## Validation
 
-16 integration tests passed, including the original Classic/Melt regressions,
+18 integration tests passed, including the original Classic/Melt regressions,
 selected donor windows, exact loop payload order, repeated-cycle images that differ,
 visual difference from both older modes, parameter boundaries, invalid windows,
 full decoding, source preservation and reference restoration after a loop.

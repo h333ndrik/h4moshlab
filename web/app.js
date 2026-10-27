@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null};
+const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, view: 'clip', sequencePosition: 0};
 const player = $('player');
 const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'motion-loop': 'Motion Loop'};
 const notes = {'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
@@ -8,9 +8,11 @@ const abort = new AbortController();
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message) { $('status').textContent = message; }
 function source(url, label) {
+  if (state.ready && player.readyState >= 1 && player.getAttribute('src') === state.ready.url && url !== state.ready.url) state.sequencePosition = player.currentTime;
+  state.view = url.startsWith('/media/job/') ? 'sequence' : 'clip';
   if (state.pendingSeek) { player.removeEventListener('loadedmetadata', state.pendingSeek); state.pendingSeek = null; }
   if (player.getAttribute('src') !== url) { player.pause(); player.removeAttribute('src'); player.load(); player.src = url; player.load(); }
-  $('empty').hidden = Boolean(url); $('preview-label').textContent = label;
+  $('empty').hidden = Boolean(url); $('preview-label').textContent = label; controls();
 }
 function setting(index) {
   const incoming = state.clips[index + 1], key = `${state.clips[index].id}|${incoming.id}`;
@@ -21,7 +23,7 @@ function setting(index) {
 function invalidate() {
   try { sessionStorage.removeItem('h4-job'); } catch {}
   try { sessionStorage.setItem('h4-sequence', JSON.stringify({order: state.clips.map(c => c.id), settings: [...state.settings]})); } catch {}
-  state.ready = null; state.previewEnd = null; $('download').hidden = true;
+  state.ready = null; state.previewEnd = null; state.sequencePosition = 0; $('download').hidden = true;
   const clip = state.clips.find(c => c.id === state.active);
   if (clip) source(clip.preview, `Clip preview · ${clip.name}`);
   else { player.pause(); player.removeAttribute('src'); player.load(); $('empty').hidden = false; $('preview-label').textContent = 'No video selected'; }
@@ -32,7 +34,10 @@ function controls() {
   $('import-label').style.pointerEvents = state.busy ? 'none' : '';
   $('import-label').setAttribute('aria-disabled', String(state.busy));
   document.querySelectorAll('#timeline button').forEach(b => b.disabled = state.busy || b.dataset.boundary === 'true');
-  $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length;
+  $('assemble').disabled = $('export').disabled = $('full-sequence').disabled = state.busy || !state.clips.length;
+  $('selected-clip').disabled = state.busy || !state.active;
+  $('full-sequence').setAttribute('aria-pressed', String(state.view === 'sequence' && Boolean(player.getAttribute('src'))));
+  $('selected-clip').setAttribute('aria-pressed', String(state.view === 'clip' && Boolean(player.getAttribute('src'))));
 }
 function busy(value) { state.busy = value; controls(); }
 function button(label, action, title) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.title = title || label; b.setAttribute('aria-label', title || label); b.onclick = action; return b; }
@@ -155,6 +160,10 @@ function motionFrame(play = false) {
 function updateDialog() {
   const {conf, needed, maximum} = clampMotion(state.dialogIndex);
   $('effect').value = conf.effect;
+  const ending = conf.ending ?? (['frame-melt', 'motion-loop'].includes(conf.effect) ? 'flow' : 'reset');
+  $('ending').value = ending;
+  $('ending-control').hidden = conf.effect === 'cut';
+  $('duration-note').textContent = ending === 'flow' ? 'After this duration, normal motion continues without a hard image reset. Distortion can persist.' : 'After this duration, the clear incoming picture is restored. This can create a visible jump.';
   $('duration').min = conf.effect === 'motion-loop' ? 3 : 1;
   $('duration').max = Math.min(144, state.clips[state.dialogIndex + 1].frames - 1);
   $('duration').value = Math.round(conf.duration * 24);
@@ -172,9 +181,10 @@ function updateDialog() {
   $('motion-window').textContent = `${start.toFixed(2)}–${(start + needed / 24).toFixed(2)} s of the incoming clip. The rest of your sequence stays in place.`;
   motionFrame();
 }
-for (const id of ['effect', 'duration', 'repeat', 'loop-length', 'motion-start']) $(id).addEventListener('input', () => {
+for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start']) $(id).addEventListener('input', () => {
   const conf = setting(state.dialogIndex); conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
   conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
+  if (id === 'ending') conf.ending = $('ending').value;
   clampMotion(state.dialogIndex); invalidate(); draw(); updateDialog();
 });
 $('watch-motion').onclick = () => motionFrame(true);
@@ -186,12 +196,14 @@ $('transition-dialog').addEventListener('close', () => {
   state.motionSeek = state.motionPlay = null; state.motionEnd = null; video.removeAttribute('src'); video.load();
 });
 function showResult(job) {
-  source(job.url, 'Assembled preview · real codec processing');
+  const changed = player.getAttribute('src') !== job.url;
+  source(job.url, 'Assembled preview · all clips and transitions');
+  if (changed) seek(state.sequencePosition, null, false);
   const download = $('download'); download.href = `${job.url}?download=1`; download.download = 'h4-mosh-lab.mp4'; download.hidden = false;
 }
-function seek(time, end) {
+function seek(time, end, autoplay = true) {
   if (state.pendingSeek) player.removeEventListener('loadedmetadata', state.pendingSeek);
-  const apply = () => { state.pendingSeek = null; player.currentTime = Math.min(time, Math.max(0, player.duration - .01)); state.previewEnd = end; player.play().catch(() => {}); };
+  const apply = () => { state.pendingSeek = null; player.currentTime = Math.min(time, Math.max(0, player.duration - .01)); state.previewEnd = end; if (autoplay) player.play().catch(() => {}); };
   if (player.readyState >= 1) apply(); else { state.pendingSeek = apply; player.addEventListener('loadedmetadata', apply, {once: true}); }
 }
 async function waitForJob(id) {
@@ -225,11 +237,17 @@ async function assemble(download = false, transitionIndex = null) {
   } catch (e) { error(e.message); status('Processing failed. Adjust the sequence or retry.'); }
   finally { busy(false); $('progress').hidden = true; }
 }
+$('full-sequence').onclick = () => assemble();
+$('selected-clip').onclick = () => {
+  const clip = state.clips.find(c => c.id === state.active);
+  if (clip) { state.previewEnd = null; source(clip.preview, `Clip preview · ${clip.name}`); }
+};
 $('assemble').onclick = () => assemble(); $('export').onclick = () => assemble(true);
 $('preview-transition').onclick = () => { const index = state.dialogIndex; $('transition-dialog').close(); assemble(false, index); };
+player.addEventListener('loadedmetadata', () => { $('time').textContent = `${player.currentTime.toFixed(2)} / ${(Number.isFinite(player.duration) ? player.duration : 0).toFixed(2)} s`; });
 player.addEventListener('timeupdate', () => {
   $('time').textContent = `${player.currentTime.toFixed(2)} / ${(Number.isFinite(player.duration) ? player.duration : 0).toFixed(2)} s`;
-  if (state.previewEnd !== null && player.currentTime >= state.previewEnd) { player.pause(); state.previewEnd = null; }
+  if (state.previewEnd !== null && player.currentTime >= state.previewEnd) { player.pause(); state.previewEnd = null; status('Transition preview paused. Press play to continue the sequence.'); }
   if (state.ready && player.getAttribute('src') === state.ready.url) {
     let index = 0;
     for (const boundary of state.ready.result.boundaries) if (player.currentTime * 24 >= boundary.frame) index++;

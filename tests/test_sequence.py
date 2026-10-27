@@ -28,7 +28,7 @@ class SequenceTests(unittest.TestCase):
 
     def test_multiple_real_transitions_and_restoration(self):
         transitions = [{'effect': 'classic-mosh', 'duration': .5},
-                       {'effect': 'frame-melt', 'duration': .5, 'repeat': 3}]
+                       {'effect': 'frame-melt', 'duration': .5, 'repeat': 3, 'ending': 'reset'}]
         progress = []
         result = render(self.clips, transitions, self.root/'effects', lambda stage, p: progress.append(p))
         self.assertEqual(self.clips[0]['frames'], 174)  # Full clip, not Phase 1's six-second cap.
@@ -62,7 +62,7 @@ class SequenceTests(unittest.TestCase):
 
     def test_motion_loop_selected_range_and_clean_restoration(self):
         result = render(self.clips[:2], [{'effect': 'motion-loop', 'duration': .5,
-                         'loop_frames': 4, 'motion_start': .25}], self.root/'loop')
+                         'loop_frames': 4, 'motion_start': .25, 'ending': 'reset'}], self.root/'loop')
         _, actual = vops(self.root/'loop/sequence.m4v')
         _, donor = vops(Path(self.clips[1]['normalized']))
         self.assertEqual(actual[174:186], [donor[7+i%4] for i in range(12)])
@@ -70,10 +70,33 @@ class SequenceTests(unittest.TestCase):
         self.assertEqual(result['boundaries'][0]['motion_start'], .25)
         self.assertEqual(actual[186][4] >> 6, 0)
 
+    def test_loop_and_melt_flow_without_an_injected_iframe(self):
+        _, donor = vops(Path(self.clips[1]['normalized']))
+        for effect in ('motion-loop', 'frame-melt'):
+            transition = {'effect': effect, 'duration': .5, 'loop_frames': 4,
+                          'repeat': 3, 'motion_start': .25}
+            result = render(self.clips[:2], [transition], self.root/f'flow-{effect}')
+            _, actual = vops(self.root/f'flow-{effect}/sequence.m4v')
+            self.assertEqual(actual[186:], donor[13:])
+            self.assertEqual([i for i,p in enumerate(actual) if p[4] >> 6 == 0], [0])
+            self.assertEqual(result['frames'], 221)
+            self.assertEqual(result['boundaries'][0]['ending'], 'flow')
+            self.assertIsNone(result['boundaries'][0]['reset_frame'])
+            self.assertEqual(result['boundaries'][0]['release_b_vop_indices'], list(range(13,48)))
+            self.assertEqual(result['full_decode'], 'passed')
+
+    def test_flow_followed_by_cut_resets_only_at_the_cut(self):
+        result = render(self.clips, [{'effect': 'motion-loop', 'duration': .5, 'loop_frames': 4},
+                                   {'effect': 'cut'}], self.root/'flow-cut')
+        _, actual = vops(self.root/'flow-cut/sequence.m4v')
+        self.assertEqual([i for i,p in enumerate(actual) if p[4] >> 6 == 0], [0,221])
+        self.assertEqual(result['frames'], 257)
+
     def test_invalid_transition_does_not_render(self):
         for transitions in ([{'effect': 'motion-transfer', 'duration': .5}],
                             [{'effect': 'classic-mosh', 'duration': 3}],
-                            [{'effect': 'frame-melt', 'duration': .5, 'repeat': 1}], []):
+                            [{'effect': 'frame-melt', 'duration': .5, 'repeat': 1}],
+                            [{'effect': 'motion-loop', 'duration': .5, 'loop_frames': 4, 'ending': 'fade'}], []):
             with self.assertRaises(ValueError):
                 render(self.clips[:2], transitions, self.root/'invalid')
         self.assertFalse((self.root/'invalid').exists())

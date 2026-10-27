@@ -3,3 +3,5 @@
 #motion-control{margin-top:20px;border-top:1px solid #ddd;padding-top:14px}#motion-control summary{font-size:12px;cursor:pointer}#motion-control label{display:block;font-size:12px;margin-top:16px}#motion-preview{display:block;width:100%;height:150px;object-fit:contain;background:#151515;border-radius:3px}#watch-motion{width:100%}
 
 dialog .section-label{position:sticky;top:0;background:#f8f8f6;z-index:1}
+
+.preview-switch{display:flex;gap:6px;margin-top:12px}.preview-switch button[aria-pressed=true]{border-color:#555;background:#e8e8e4}.preview-switch button{font-size:11px;padding:8px 12px}

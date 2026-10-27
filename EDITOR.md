@@ -47,7 +47,10 @@ The cloud run was validated on Linux/Chromium; Mac/Safari has not been tested.
    Connector labels use separate name/time lines and fit their contents, including
    at 200% zoom; existing fonts and background are retained.
    [Details and comparison](MOTION_LOOP.md). Cut hides effect-only controls. No shader or fake mode.
-4. Assemble the preview. The server creates and fully decodes an actual MP4 before
+4. Use **Full sequence** directly below the player to assemble/open the complete
+   film. **Selected clip** opens the active original clip. Clicking a timeline card
+   also opens a clip; Full sequence returns to the cached complete render and its
+   previous position without submitting a new job. Assemble the preview. The server creates and fully decodes an actual MP4 before
    declaring it ready. Status shows assembly stages, encoding progress from FFmpeg's
    output timestamps, and final decode validation. Playback and seeking use native
    video controls and HTTP byte ranges. Active cards follow assembled playback.
@@ -72,17 +75,21 @@ behavior and regression coverage. The editor normalizes **entire clips**, up to
 For each effect boundary, the incoming I-VOP is omitted and the selected B P-VOP
 payloads are appended unchanged to the preceding clip's final reference. Classic
 uses sequential P-VOPs; Melt repeats each P-VOP against the evolving reference.
-At the configured effect duration, the remaining incoming clip is re-encoded with
-a fresh I-frame to restore its normal image. Passthrough frame synchronization
-avoids inserting a duplicate frame during this restoration. Normal cuts retain
+At the configured effect duration, Loop and Melt now default to **Continue motion**:
+remaining B P-VOPs are appended unchanged, keeping the evolving reference rather
+than injecting a full-image reset. Distortion may persist through the clip.
+**Restore clear image** remains selectable for every effect and is still Classic
+Mosh's default: it re-encodes the remainder with a fresh I-frame. Passthrough frame
+synchronization avoids inserting a duplicate frame during that restoration. Normal cuts retain
 all source VOPs and reset with the incoming I-VOP. One consistent normalization
 configuration is used throughout; intermediate internal timestamps are replaced
 by the explicit 24fps decoding cadence.
 
 Effects occupy the beginning of an incoming clip; they are not overlap dissolves.
 Each mosh boundary drops one source frame (B's initial I-frame), as in Phase 1.
-The rest of the clip remains; Melt may visibly jump to normal B when its window
-ends because it traverses fewer donor frames. A normal cut drops no frames.
+The rest of the clip remains; Selecting Restore clear image may visibly jump to normal B when its window
+ends; Continue motion avoids that forced reset but does not guarantee a clean
+final image or perfectly smooth motion on every source. A normal cut drops no frames.
 Outputs are silent 640×480/24fps with preserved aspect ratio. Audio and
 selectable higher-resolution exports are not implemented. This limitation is displayed in the interface.
 
@@ -105,8 +112,8 @@ python3 -m unittest discover -s tests -v
 node --check web/app.js  # Optional JS syntax check when Node is available.
 ```
 
-Sixteen integration tests passed: all six original effect regressions plus full-clip
-sequencing, multiple real boundaries, normal-reference restoration, cut reordering,
+Eighteen integration tests passed: all six original effect regressions plus full-clip
+sequencing, multiple real boundaries, normal-reference restoration, no-reset release payloads, clean cuts after release, cut reordering,
 one-clip exports and invalid requests. The >6s fixture confirms no editor truncation. Missing-tool tests check startup
 diagnostics, actionable import errors, cleanup and retry after a failed import.
 The sequence test compares actual compressed P-VOP payloads and expected I-frame
@@ -160,3 +167,25 @@ The server now checks both tools before starting, rather than accepting an uploa
 and displaying an incorrect format hint. Runtime missing-tool errors also name
 the install command. Other processing failures write their details to the server
 terminal; copy that error for diagnosis instead of renaming or modifying originals.
+
+## Abrupt ending regression
+
+Loop/Melt previously always inserted a newly encoded I-frame after their effect
+window. That caused the visible jump to a clean picture. Sequence transitions now
+accept `ending: "flow"` or `"reset"`; omitted ending defaults to flow for Loop/Melt
+and reset for Classic. Flow appends B's original P-VOPs from `effect_frames+1`
+through the clip end, byte-identical, with no extra I-frame. Duration and frame
+count stay unchanged. The report records `ending`, `reset_frame` (null for flow)
+and `release_b_vop_indices`. This applies to full-sequence rendering; the standalone
+Phase 1/2 pair-proof CLI has no post-effect remainder and is unchanged.
+
+[Old reset vs new flow, side by side](demo/flow-ending/comparison.mp4?raw=true):
+left old reset, right new flow. On the supplied MOV pair with a one-second Loop,
+the adjacent-frame RGB change at the release point was 32.64/255 for reset versus
+9.56/255 for flow. Both 159-frame outputs and the comparison fully decode.
+This measures one example, not a universal smoothness guarantee. No blend/shader
+or decoded-frame interpolation is used.
+
+Browser coverage now also verifies selecting an individual clip and returning to
+the complete film without another render request, retaining playback position,
+ending selection/persistence, and default flow reaching the actual output.

@@ -48,6 +48,11 @@ with sync_playwright() as p:
     expect(page.locator('#repeat-control')).to_be_visible()
     expect(page.locator('#loop-control')).to_be_hidden()
     page.locator('#effect').select_option('motion-loop')
+    expect(page.locator('#ending')).to_have_value('flow')
+    page.locator('#ending').select_option('reset')
+    expect(page.locator('#duration-note')).to_contain_text('visible jump')
+    page.locator('#ending').select_option('flow')
+    expect(page.locator('#duration-note')).to_contain_text('without a hard image reset')
     page.locator('#duration').fill('24')
     page.locator('#loop-length').fill('6')
     expect(page.locator('#duration-value')).to_have_text('1.00 s')
@@ -68,7 +73,7 @@ with sync_playwright() as p:
     page.reload()
     expect(page.locator('#count')).to_have_text('3 clips')
     expect(page.locator('.connector').first).to_contain_text('Loop')
-    page.locator('#assemble').click()
+    page.locator('#full-sequence').click()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)
     page.wait_for_function('document.querySelector("#player").videoWidth === 640 && document.querySelector("#player").videoHeight === 480')
     page.locator('#player').evaluate('(v) => v.play()')
@@ -79,9 +84,35 @@ with sync_playwright() as p:
     with urllib.request.urlopen(base+'/api/jobs/'+url.rsplit('/', 1)[1]) as response:
         report = json.load(response)['result']
     assert report['boundaries'][0]['effect'] == 'motion-loop'
+    assert report['boundaries'][0]['ending'] == 'flow'
+    assert report['boundaries'][0]['reset_frame'] is None
+    assert report['boundaries'][1]['ending'] == 'reset'
     assert report['boundaries'][0]['b_vop_indices'] == [13+i%6 for i in range(24)]
     assert report['boundaries'][1]['b_vop_indices'] == list(range(7,19))
     assert report['source_sha256'] == [hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in files[:3]]
+    # Returning from an individual clip must reuse the complete render and position.
+    page.locator('#player').evaluate('(v) => {v.pause(); v.currentTime=1.1}')
+    page.wait_for_function('!document.querySelector("#player").seeking')
+    page.get_by_role('button', name=f'Select {Path(files[2]).name}', exact=True).click()
+    expect(page.locator('#selected-clip')).to_have_attribute('aria-pressed', 'true')
+    expect(page.locator('#preview-label')).to_contain_text('Clip preview')
+    render_posts = []
+    def record_job(request):
+        if request.method == 'POST' and request.url.endswith('/api/jobs'):
+            render_posts.append(request.url)
+    page.on('request', record_job)
+    page.locator('#full-sequence').click()
+    page.wait_for_function('document.querySelector("#player").readyState >= 2 && !document.querySelector("#player").seeking')
+    expect(page.locator('#full-sequence')).to_have_attribute('aria-pressed', 'true')
+    assert page.locator('#player').get_attribute('src') == url
+    assert abs(page.locator('#player').evaluate('(v) => v.currentTime') - 1.1) < .1
+    assert render_posts == []
+    page.remove_listener('request', record_job)
+    page.locator('#selected-clip').click()
+    expect(page.locator('#selected-clip')).to_have_attribute('aria-pressed', 'true')
+    page.locator('#full-sequence').click()
+    expect(page.locator('#full-sequence')).to_have_attribute('aria-pressed', 'true')
+
     page.reload()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)
     assert page.locator('#player').get_attribute('src') == url

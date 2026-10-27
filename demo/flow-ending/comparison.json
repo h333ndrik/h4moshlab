@@ -1,0 +1,9 @@
+{
+  "boundary_frame": 94,
+  "adjacent_frame_rgb_mae_8bit": {
+    "reset": 32.63683051215278,
+    "flow": 9.562416449652778
+  },
+  "layout": "left: old reset; right: flow",
+  "frames": 159
+}

@@ -32,6 +32,14 @@ def prepare(source, directory):
             'frames': len(packets), 'duration': len(packets)/FPS, 'sha256': digest(Path(source))}
 
 
+def ending_mode(transition):
+    default = 'flow' if transition.get('effect') in ('frame-melt', 'motion-loop') else 'reset'
+    ending = transition.get('ending', default)
+    if ending not in ('flow', 'reset'):
+        raise ValueError('Choose flow or reset for the effect ending.')
+    return ending
+
+
 def render(clips, transitions, directory, progress=lambda stage, fraction: None):
     if not 1 <= len(clips) <= 12 or len(transitions) != len(clips)-1:
         raise ValueError('Use 1–12 clips with one transition per boundary.')
@@ -43,6 +51,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
         if effect not in ('cut', *EFFECTS):
             raise ValueError('Unsupported effect.')
         if effect != 'cut':
+            ending_mode(transition)
             if type(duration) not in (int, float) or not math.isfinite(duration) or not 1/FPS <= duration <= min(6, (clip['frames']-1)/FPS):
                 raise ValueError('Transition duration exceeds the incoming clip (maximum 6s).')
             prediction_plan(clip['frames'], effect, round(duration*FPS), repeat, transition.get('motion_start', 0), transition.get('loop_frames'))
@@ -62,18 +71,23 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
             else:
                 transition = transitions[i-1]
                 count = round(transition['duration']*FPS)
+                ending = ending_mode(transition)
                 indices, config = prediction_plan(len(packets), transition['effect'], count, transition.get('repeat', 4),
                                                  transition.get('motion_start', 0), transition.get('loop_frames'))
                 tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
-                                   'motion_start': config['motion_start'], 'parameters': config,
+                                   'motion_start': config['motion_start'], 'parameters': config, 'ending': ending,
+                                   'reset_frame': expected+count if ending == 'reset' and count+1 < len(packets) else None,
+                                   'release_b_vop_indices': list(range(count+1, len(packets))) if ending == 'flow' else [],
                                    'b_vop_indices': indices,
                                    'payload_sha256': [hashlib.sha256(p).hexdigest() for p in tail]})
                 target.write(b''.join(tail))
-                # Restore B at the time following the effect with a fresh reference.
-                # Every remaining source frame is retained; only B's initial I is dropped.
+                # Flow keeps the evolving reference: normal P-VOPs continue with
+                # no forced I-frame. Reset retains the original clear-image exit.
                 start = count+1
-                if start < len(packets):
+                if ending == 'flow':
+                    target.write(b''.join(packets[start:]))
+                elif start < len(packets):
                     suffix = directory/f'restore-{i}.m4v'
                     run('ffmpeg', '-v', 'error', '-y', '-r', FPS, '-i', clip['normalized'],
                         '-vf', f'trim=start_frame={start},setpts=PTS-STARTPTS', '-an',
