@@ -73,7 +73,7 @@ with sync_playwright() as p:
     page.reload()
     expect(page.locator('#count')).to_have_text('3 clips')
     expect(page.locator('.connector').first).to_contain_text('Loop')
-    page.locator('#full-sequence').click()
+    page.locator('#assemble').click()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)
     page.wait_for_function('document.querySelector("#player").videoWidth === 640 && document.querySelector("#player").videoHeight === 480')
     page.locator('#player').evaluate('(v) => v.play()')
@@ -94,24 +94,22 @@ with sync_playwright() as p:
     page.locator('#player').evaluate('(v) => {v.pause(); v.currentTime=1.1}')
     page.wait_for_function('!document.querySelector("#player").seeking')
     page.get_by_role('button', name=f'Select {Path(files[2]).name}', exact=True).click()
-    expect(page.locator('#selected-clip')).to_have_attribute('aria-pressed', 'true')
     expect(page.locator('#preview-label')).to_contain_text('Clip preview')
     render_posts = []
     def record_job(request):
         if request.method == 'POST' and request.url.endswith('/api/jobs'):
             render_posts.append(request.url)
     page.on('request', record_job)
-    page.locator('#full-sequence').click()
+    page.locator('#assemble').click()
     page.wait_for_function('document.querySelector("#player").readyState >= 2 && !document.querySelector("#player").seeking')
-    expect(page.locator('#full-sequence')).to_have_attribute('aria-pressed', 'true')
+    expect(page.locator('#preview-label')).to_contain_text('Assembled preview')
     assert page.locator('#player').get_attribute('src') == url
     assert abs(page.locator('#player').evaluate('(v) => v.currentTime') - 1.1) < .1
     assert render_posts == []
     page.remove_listener('request', record_job)
-    page.locator('#selected-clip').click()
-    expect(page.locator('#selected-clip')).to_have_attribute('aria-pressed', 'true')
-    page.locator('#full-sequence').click()
-    expect(page.locator('#full-sequence')).to_have_attribute('aria-pressed', 'true')
+    page.get_by_role('button', name=f'Select {Path(files[0]).name}', exact=True).click()
+    page.locator('#assemble').click()
+    expect(page.locator('#preview-label')).to_contain_text('Assembled preview')
 
     page.reload()
     expect(page.locator('#status')).to_contain_text('verified full decode', timeout=120000)

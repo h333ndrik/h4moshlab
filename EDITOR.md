@@ -47,10 +47,9 @@ The cloud run was validated on Linux/Chromium; Mac/Safari has not been tested.
    Connector labels use separate name/time lines and fit their contents, including
    at 200% zoom; existing fonts and background are retained.
    [Details and comparison](MOTION_LOOP.md). Cut hides effect-only controls. No shader or fake mode.
-4. Use **Full sequence** directly below the player to assemble/open the complete
-   film. **Selected clip** opens the active original clip. Clicking a timeline card
-   also opens a clip; Full sequence returns to the cached complete render and its
-   previous position without submitting a new job. Assemble the preview. The server creates and fully decodes an actual MP4 before
+4. **Assemble preview** opens the complete film. Clicking a timeline card opens
+   an individual clip; Assemble preview returns to the cached complete render
+   and its previous position without submitting a new job. The server creates and fully decodes an actual MP4 before
    declaring it ready. Status shows assembly stages, encoding progress from FFmpeg's
    output timestamps, and final decode validation. Playback and seeking use native
    video controls and HTTP byte ranges. Active cards follow assembled playback.

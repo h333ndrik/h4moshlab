@@ -4,7 +4,7 @@
 
 Import multiple clips, reorder, set real Classic Mosh / Frame Melt / Motion Loop transitions,
 assemble and scrub a verified preview, and download the same MP4.
-Use **Full sequence** below the player to return from a clip to the complete film.
+Use **Assemble preview** to return from a clip to the complete film.
 Loop and Melt now continue without a hard image reset by default; a clear reset
 remains selectable.
 

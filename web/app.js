@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, view: 'clip', sequencePosition: 0};
+const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
 const names = {'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'motion-loop': 'Motion Loop'};
 const notes = {'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
@@ -9,7 +9,6 @@ function error(message = '') { $('error').textContent = message; $('error').hidd
 function status(message) { $('status').textContent = message; }
 function source(url, label) {
   if (state.ready && player.readyState >= 1 && player.getAttribute('src') === state.ready.url && url !== state.ready.url) state.sequencePosition = player.currentTime;
-  state.view = url.startsWith('/media/job/') ? 'sequence' : 'clip';
   if (state.pendingSeek) { player.removeEventListener('loadedmetadata', state.pendingSeek); state.pendingSeek = null; }
   if (player.getAttribute('src') !== url) { player.pause(); player.removeAttribute('src'); player.load(); player.src = url; player.load(); }
   $('empty').hidden = Boolean(url); $('preview-label').textContent = label; controls();
@@ -34,10 +33,7 @@ function controls() {
   $('import-label').style.pointerEvents = state.busy ? 'none' : '';
   $('import-label').setAttribute('aria-disabled', String(state.busy));
   document.querySelectorAll('#timeline button').forEach(b => b.disabled = state.busy || b.dataset.boundary === 'true');
-  $('assemble').disabled = $('export').disabled = $('full-sequence').disabled = state.busy || !state.clips.length;
-  $('selected-clip').disabled = state.busy || !state.active;
-  $('full-sequence').setAttribute('aria-pressed', String(state.view === 'sequence' && Boolean(player.getAttribute('src'))));
-  $('selected-clip').setAttribute('aria-pressed', String(state.view === 'clip' && Boolean(player.getAttribute('src'))));
+  $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length;
 }
 function busy(value) { state.busy = value; controls(); }
 function button(label, action, title) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.title = title || label; b.setAttribute('aria-label', title || label); b.onclick = action; return b; }
@@ -237,11 +233,6 @@ async function assemble(download = false, transitionIndex = null) {
   } catch (e) { error(e.message); status('Processing failed. Adjust the sequence or retry.'); }
   finally { busy(false); $('progress').hidden = true; }
 }
-$('full-sequence').onclick = () => assemble();
-$('selected-clip').onclick = () => {
-  const clip = state.clips.find(c => c.id === state.active);
-  if (clip) { state.previewEnd = null; source(clip.preview, `Clip preview · ${clip.name}`); }
-};
 $('assemble').onclick = () => assemble(); $('export').onclick = () => assemble(true);
 $('preview-transition').onclick = () => { const index = state.dialogIndex; $('transition-dialog').close(); assemble(false, index); };
 player.addEventListener('loadedmetadata', () => { $('time').textContent = `${player.currentTime.toFixed(2)} / ${(Number.isFinite(player.duration) ? player.duration : 0).toFixed(2)} s`; });
