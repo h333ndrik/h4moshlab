@@ -109,3 +109,13 @@ existing start/length parameters. See TRANSITION_WORKFLOW.md.
 Sound on/off is a small master checkbox beside the player: original audio in
 preview AND export, default on, session-persisted. Off means no exported audio
 stream. Keep original media unchanged and do not label this audio moshing.
+
+## Export simplicity and future priorities
+
+The user wants one simple export button with the best practical output quality,
+not a quality selector or low/medium/high presets. Preserve the explicitly chosen
+640x480 processing resolution unless the user requests a resolution change.
+Do not call current lossy delivery lossless or maximum source resolution.
+Undo/redo, saved projects, tested effect presets and BPM alignment interest the
+user; start with undo/redo and effect presets when implementing the next phase.
+These are ideas/priorities, not yet implemented capabilities.
