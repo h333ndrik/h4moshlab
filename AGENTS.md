@@ -80,3 +80,12 @@ Gentler repetition movement is implemented for Frame Melt, Progressive Melt and
 Motion Stutter. See SMOOTH_REPETITIONS.md: boolean smooth API parameter, donor
 advances bounded to two and final quarter consecutive, unchanged duration/audio.
 Keep Original cadence selectable; do not promise universally smooth distortion.
+
+## Current design experiment: dark version
+
+The user explicitly requested a negative/dark version after the light baseline.
+Current experiment: near-black background with a subtle neutral gradient,
+off-white type, gray video well, charcoal cards/dialog and light primary export.
+Keep existing typography, dimensions, structure, cursor and features. This is
+a requested visual experiment; do not assume final user approval of this palette.
+The prior light layout remains available in Git before this experiment.

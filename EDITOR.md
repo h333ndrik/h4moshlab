@@ -200,3 +200,11 @@ outline, -25 degrees at rest and 0 degrees over enabled interactive controls, wi
 touch input and asset-load failures retain the native pointer.
 Optional Chromium validation: `python3 tests/browser_cursor.py` with the server
 running; set H4_EDITOR_TEST_URL if using a different port.
+
+## Dark design experiment
+
+The current branch previews the requested dark palette: near-black page, neutral
+gray video well, off-white text, charcoal cards/settings and light export button.
+Layout, type, cursor and processing behavior are unchanged. Prior light design
+is available in Git before this experiment. Reference: demo/editor/dark.png.
+Browser effect/export flow and widths 320–1200px were checked.
