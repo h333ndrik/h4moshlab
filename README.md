@@ -159,3 +159,5 @@ endpoint that accepts two uploaded file paths and returns the rendered MP4.
 [Reset Pulse, short previews, release, A/B comparison and motion marks](TRANSITION_WORKFLOW.md)
 
 [**h4 moshlab blueprint 1 — permanent save point and restoration**](blueprints/blueprint-1.md)
+
+[Undo/redo, presets, saved projects, BPM and clip negatives](EDITOR_TOOLS.md)

@@ -131,3 +131,17 @@ continue separately so the user can return to this exact baseline.
 BPM alignment to music is now a desired next feature, especially for pulse,
 stutter and loop timing. It is not implemented yet. Keep the UI simple and do not
 claim automatic beat detection or music synchronization before it is built/tested.
+
+## Current implementation beyond Blueprint 1
+
+Undo/redo, three tested starting points per effect, lightweight .h4mosh project
+files, manual BPM timing and per-video looks are implemented; see EDITOR_TOOLS.md.
+Keep the UI compact: two history arrows + Project menu; presets in the existing
+dialog; BPM expandable for Motion Loop/Stutter/Reset Pulse only. Beat boundaries
+are rounded individually to 24fps to avoid accumulating interval-rounding drift.
+Do not claim automatic beat detection, absolute downbeat alignment or music import.
+Projects store edit decisions and source hashes, not embedded originals. Removed
+media is retained locally for undo until session shutdown (24 sources total,
+12 active, 40 undo actions per tab); never publish private test projects/media.
+Per-clip Original/B&W/B&W-negative/Color-negative are preprocessing filters, not
+codec mosh modes. Preserve source files, audio, duration and Blueprint 1 tag.

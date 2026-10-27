@@ -20,7 +20,7 @@ function source(url, label) {
 function setting(index) {
   const incoming = state.clips[index + 1], key = `${state.clips[index].id}|${incoming.id}`;
   if (!state.settings.has(key)) state.settings.set(key, {effect: 'classic-mosh', duration: Math.min(24, incoming.frames - 1) / 24, repeat: 4});
-  const conf = state.settings.get(key); conf.motion_start ??= 0; conf.loop_frames ??= 12;
+  const conf = state.settings.get(key); conf.motion_start ??= 0; conf.loop_frames ??= 12; conf.repeat ??=4;
   return conf;
 }
 function invalidate() {
@@ -33,10 +33,13 @@ function invalidate() {
   status(state.clips.length ? 'Sequence changed. Assemble to preview the real transitions.' : 'Ready to import.');
 }
 function controls() {
+  updateHistoryControls();
+  for(const id of ['preset','apply-tempo'])$(id).disabled=state.busy;
   $('sound').disabled = state.busy;
   $('files').disabled = state.busy;
   $('import-label').style.pointerEvents = state.busy ? 'none' : '';
   $('import-label').setAttribute('aria-disabled', String(state.busy));
+  document.querySelectorAll('.clip-look').forEach(select=>select.disabled=state.busy);
   document.querySelectorAll('#timeline button').forEach(b => b.disabled = state.busy || b.dataset.boundary === 'true');
   $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length;
 }
@@ -69,7 +72,7 @@ function draw() {
     const right = button('→', () => move(clip.id, index + 1), `Move ${clip.name} right`);
     left.dataset.boundary = String(index === 0); right.dataset.boundary = String(index === state.clips.length - 1);
     const duration = document.createElement('small'); duration.textContent = `${clip.duration.toFixed(2)}s`;
-    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); timeline.append(card);
+    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);card.append(look);timeline.append(card);
   });
   document.querySelector('.sequence > .hint').textContent = touchUI() ? 'Swipe to browse clips. Use the arrows to reorder. Tap a connector to set a transition.' : 'Drag clips to reorder, or use the arrows. Select the connector between clips to set a transition.';
   controls();
@@ -77,7 +80,7 @@ function draw() {
 function move(id, to) {
   if (state.busy || to < 0 || to >= state.clips.length) return;
   const from = state.clips.findIndex(c => c.id === id); if (from < 0 || from === to) return;
-  state.clips.splice(to, 0, state.clips.splice(from, 1)[0]); invalidate(); draw();
+  finishEdit();beginEdit();state.clips.splice(to, 0, state.clips.splice(from, 1)[0]); invalidate(); draw();finishEdit();
 }
 async function request(url, options = {}) {
   const response = await fetch(url, {...options, signal: abort.signal});
@@ -89,10 +92,10 @@ async function remove(id) {
   if (state.busy) return; busy(true); error();
   try {
     await request(`/api/clips/${id}`, {method: 'DELETE'});
-    state.clips = state.clips.filter(c => c.id !== id);
+    finishEdit();beginEdit();state.clips = state.clips.filter(c => c.id !== id);
     for (const key of state.settings.keys()) if (key.split('|').includes(id)) state.settings.delete(key);
     if (state.active === id) state.active = state.clips[0]?.id || null;
-    invalidate(); draw();
+    invalidate(); draw();finishEdit();
   } catch (e) { error(e.message); } finally { busy(false); }
 }
 function upload(file, index, total) {
@@ -110,7 +113,7 @@ function upload(file, index, total) {
 }
 $('files').onchange = async event => {
   const files = [...event.target.files]; event.target.value = ''; if (!files.length) return;
-  error(); busy(true); $('progress').hidden = false;
+  finishEdit();beginEdit();error(); busy(true); $('progress').hidden = false;
   try {
     if (state.clips.length + files.length > 12) throw new Error('Choose at most 12 clips in total.');
     for (const [index, file] of files.entries()) {
@@ -118,7 +121,7 @@ $('files').onchange = async event => {
       const clip = await upload(file, index + 1, files.length); state.clips.push(clip); state.active ||= clip.id; invalidate(); draw();
     }
     status('Clips ready. Choose transitions, then assemble the preview.');
-  } catch (e) { error(e.message); status('Import failed. See the message below; you can retry.'); } finally { busy(false); $('progress').hidden = true; }
+  } catch (e) { error(e.message); status('Import failed. See the message below; you can retry.'); } finally { busy(false); $('progress').hidden = true; finishEdit(); }
 };
 function clampMotion(index) {
   const conf = setting(index), available = state.clips[index + 1].frames - 1;
@@ -129,9 +132,10 @@ function clampMotion(index) {
   conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
   conf.loop_frames = Math.max(['motion-stutter', 'reset-pulse'].includes(conf.effect) ? 4 : 2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
   const softened = smoothEffects.includes(conf.effect) && conf.smooth;
-  const needed = alignedEffects.includes(conf.effect) || softened ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
+  const needed = alignedEffects.includes(conf.effect) || softened ? count : conf.effect === 'motion-loop' ? (conf.tempo ? Math.ceil(24*60/conf.tempo.bpm*conf.tempo.beats) : conf.loop_frames) : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
   const maximum = alignedEffects.includes(conf.effect) || softened ? 0 : Math.max(0, available - needed);
   conf.motion_start = Math.max(0, Math.min(maximum, Math.round(conf.motion_start * 24))) / 24;
+  if(conf.tempo && conf.loop_frames!==Math.floor(24*60/conf.tempo.bpm*conf.tempo.beats+.5))delete conf.tempo;
   return {conf, count, needed, maximum};
 }
 function openTransition(index) {
@@ -164,6 +168,10 @@ function motionFrame(play = false) {
 function updateDialog() {
   const {conf, needed, maximum} = clampMotion(state.dialogIndex);
   $('effect').value = conf.effect;
+  $('preset-control').hidden=conf.effect==='cut';$('preset').value=conf.preset==null?'custom':String(conf.preset);
+  $('tempo-control').hidden=!['motion-loop','motion-stutter','reset-pulse'].includes(conf.effect);
+  if(conf.tempo){$('bpm').value=conf.tempo.bpm;$('beats').value=conf.tempo.beats;}
+  $('tempo-note').textContent=conf.tempo?`${conf.tempo.bpm} BPM · ${conf.tempo.beats} beat(s) · around ${(conf.loop_frames/24).toFixed(3)} s. Each beat is rounded separately to 24fps; starts with this effect, not automatic beat detection.`:'Manual tempo, rounded to 24fps. Timing starts with this effect; no automatic beat detection.';
   $('smooth-control').hidden = !smoothEffects.includes(conf.effect);
   $('smooth').value = conf.smooth ? 'smooth' : 'original';
   const gentle = smoothEffects.includes(conf.effect) && conf.smooth;
@@ -198,7 +206,9 @@ function updateDialog() {
   motionFrame();
 }
 for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release']) $(id).addEventListener('input', () => {
-  const conf = setting(state.dialogIndex); conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
+  beginEdit();const conf = setting(state.dialogIndex);delete conf.preset;
+  if(['effect','loop-length'].includes(id))delete conf.tempo;
+  conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
   conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
   if (id === 'effect') conf.smooth = smoothEffects.includes(conf.effect);
   if (id === 'release') conf.release_duration = Number($('release').value)/24;
@@ -263,12 +273,12 @@ async function assemble(download = false, transitionIndex = null) {
   finally { busy(false); $('progress').hidden = true; }
 }
 $('sound').onchange=()=>{
-  state.sound=$('sound').checked; player.muted=!state.sound;
+  finishEdit();beginEdit();state.sound=$('sound').checked; player.muted=!state.sound;
   $('sound-label').textContent=state.sound ? 'Sound on' : 'Sound off';
   if (!state.sound) $('motion-preview').muted=true;
   try { sessionStorage.setItem('h4-audio',JSON.stringify(state.sound)); } catch {}
   invalidate();
-  status(state.sound ? 'Sound on · original audio in preview and export.' : 'Sound off · preview and export are silent.');
+  status(state.sound ? 'Sound on · original audio in preview and export.' : 'Sound off · preview and export are silent.');finishEdit();
 };
 $('assemble').onclick = () => assemble(); $('export').onclick = () => assemble(true);
 async function previewTransition(index, smoothOverride = null) {
@@ -282,7 +292,7 @@ async function previewTransition(index, smoothOverride = null) {
   }
   const transitions = state.clips.slice(1).map((_,i)=>({...setting(i)}));
   if (smoothOverride !== null) transitions[index].smooth = smoothOverride;
-  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>c.id),transitions:transitions.slice(0,index+1),index});
+  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>`${c.id}:${c.look||'original'}`),transitions:transitions.slice(0,index+1),index});
   error(); busy(true);
   try {
     let result = transitionCache.get(key);
@@ -304,17 +314,17 @@ for (const [id,gentle] of [['compare-original',false],['compare-gentler',true]])
   const index=state.dialogIndex; $('transition-dialog').close(); previewTransition(index,gentle);
 };
 $('mark-motion-start').onclick=()=>{
-  const index=state.dialogIndex, conf=setting(index);
+  finishEdit();beginEdit();const index=state.dialogIndex, conf=setting(index);delete conf.preset;
   conf.motion_start=Math.max(0,Math.round($('motion-preview').currentTime*24)-1)/24;
-  clampMotion(index); invalidate(); draw(); updateDialog();
+  clampMotion(index); invalidate(); draw(); updateDialog();finishEdit();
 };
 $('mark-motion-end').onclick=()=>{
   const index=state.dialogIndex, conf=setting(index);
   const frames=Math.round($('motion-preview').currentTime*24)-Math.round(conf.motion_start*24);
   if (frames<2 || frames>48) { error('Choose an end after the start, within 2 seconds.'); return; }
-  error(); conf.loop_frames=frames;
+  finishEdit();beginEdit();error();delete conf.tempo;delete conf.preset;conf.loop_frames=frames;
   conf.duration=Math.max(conf.duration,(frames+1)/24);
-  clampMotion(index); invalidate(); draw(); updateDialog();
+  clampMotion(index); invalidate(); draw(); updateDialog();finishEdit();
 };
 $('preview-transition').onclick = () => { const index = state.dialogIndex; $('transition-dialog').close(); assemble(false, index); };
 $('motion-preview').addEventListener('volumechange',()=>{if (!state.sound && !$('motion-preview').muted) $('motion-preview').muted=true;});

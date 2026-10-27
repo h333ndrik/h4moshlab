@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
+from editor_options import validate_tempo
 
 from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
 from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args
@@ -12,7 +13,7 @@ from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
 FPS = 24
 
 
-def prepare(source, directory):
+def prepare(source, directory, look='original'):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     metadata = probe(source)
@@ -21,7 +22,7 @@ def prepare(source, directory):
     if not videos or not math.isfinite(duration) or not 0 < duration <= 120:
         raise ValueError('Use a video between 0 and 120 seconds.')
     normalized = directory/'clip.m4v'
-    normalize(source, normalized, max_seconds=None)
+    normalize(source, normalized, max_seconds=None, look=look)
     header, packets = vops(normalized)
     if len(packets) < 2 or [p[4] >> 6 for p in packets] != [0]+[1]*(len(packets)-1):
         raise ValueError('Video must normalize to at least two I/P frames.')
@@ -30,7 +31,7 @@ def prepare(source, directory):
     run('ffmpeg', '-v', 'error', '-y', '-r', FPS, '-i', normalized, *encoding_args(audio),
         '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', preview)
     run('ffmpeg', '-v', 'error', '-y', '-i', preview, '-frames:v', '1', directory/'thumb.jpg')
-    return {'source': str(source), 'normalized': str(normalized), 'preview': str(preview), 'audio': audio,
+    return {'look':look, 'source': str(source), 'normalized': str(normalized), 'preview': str(preview), 'audio': audio,
             'frames': len(packets), 'duration': len(packets)/FPS, 'sha256': digest(Path(source))}
 
 
@@ -59,11 +60,12 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
         if effect not in ('cut', *EFFECTS):
             raise ValueError('Unsupported effect.')
         if effect != 'cut':
+            validate_tempo(transition)
             ending_mode(transition)
             if type(duration) not in (int, float) or not math.isfinite(duration) or not 1/FPS <= duration <= min(6, (clip['frames']-1)/FPS):
                 raise ValueError('Transition duration exceeds the incoming clip (maximum 6s).')
             prediction_plan(clip['frames'], effect, round(duration*FPS), repeat, transition.get('motion_start', 0), transition.get('loop_frames'), transition.get('smooth', False) if effect in SMOOTH_EFFECTS else False,
-                            transition.get('release_duration') if effect in SMOOTH_EFFECTS and transition.get('smooth') else None)
+                            transition.get('release_duration') if effect in SMOOTH_EFFECTS and transition.get('smooth') else None, transition.get('tempo'))
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     stream = directory/'sequence.m4v'
@@ -84,9 +86,10 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
                 indices, config = prediction_plan(len(packets), transition['effect'], count, transition.get('repeat', 4),
                                                  transition.get('motion_start', 0), transition.get('loop_frames'),
                                                  transition.get('smooth', False) if transition['effect'] in SMOOTH_EFFECTS else False,
-                                                 transition.get('release_duration') if transition['effect'] in SMOOTH_EFFECTS and transition.get('smooth') else None)
+                                                 transition.get('release_duration') if transition['effect'] in SMOOTH_EFFECTS and transition.get('smooth') else None, transition.get('tempo'))
                 tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
+                                   'tempo': transition.get('tempo'),
                                    'motion_start': config['motion_start'], 'parameters': config, 'ending': ending,
                                    'reset_frame': expected+count if ending == 'reset' and count+1 < len(packets) else None,
                                    'release_b_vop_indices': list(range(count+1, len(packets))) if ending == 'flow' else [],

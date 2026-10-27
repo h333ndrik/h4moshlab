@@ -180,3 +180,25 @@ Immutable tag: h4-moshlab-blueprint-1. See blueprints/blueprint-1.md for restora
 and scope. Application baseline is a4f2186; snapshot documentation changes no
 application code. Never move this tag. BPM alignment to music is the next desired
 direction, not an implemented feature. No private footage or session data saved.
+
+## Current completed phase after Blueprint 1
+
+See PROJECT_PLAN.md, PROJECT_PROGRESS.md, NEXT_SESSION.md and EDITOR_TOOLS.md.
+Implemented undo/redo (40 actions, coalesced sliders), 21 genuine parameter
+presets, .h4mosh projects with SHA256 relinking, manual per-beat BPM for periodic
+modes, and per-clip Original/B&W/B&W-negative/Color-negative looks. Existing light
+UI is preserved; two history arrows + Project menu, preset selector in dialog,
+expandable BPM, one small look selector per clip. No quality selector.
+
+BPM rounds each beat boundary separately (137BPM reset offsets begin10/20/31/41),
+not a repeatedly rounded fixed interval. No automatic detection/downbeat claim.
+Project files do not contain original footage. Deleted media is temporarily
+archived for undo until session shutdown; maximum24 session sources,12 active.
+Per-clip looks are preprocessing filters, not additional codec mosh algorithms.
+
+39 integration tests passed (138.157s), pure Node project/history checks passed,
+new workflow with original MOVs passed including relink on a second empty server,
+existing browser smoke passed, no JS errors. B&W tint was corrected and pixel/
+audio/source tests passed. Real export H264640x480/AAC6.625s verified. Synthetic-
+only reference screenshots in demo/editor/editor-tools.png and tempo.png.
+Do not move h4-moshlab-blueprint-1; plan/progress files record the publication step.

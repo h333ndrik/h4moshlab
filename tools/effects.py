@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 
+from tempo import tempo_frames, musical_positions
 from mosh import digest, normalize, probe, run, vops
 
 EFFECTS = {
@@ -29,6 +30,8 @@ SMOOTH_EFFECTS = ('frame-melt', 'progressive-melt', 'motion-stutter')
 for _effect in SMOOTH_EFFECTS:
     EFFECTS[_effect]['parameters']['smooth'] = {'default': False}
     EFFECTS[_effect]['parameters']['release_duration'] = {'default': None}
+for _effect in ('motion-loop','motion-stutter','reset-pulse'):
+    EFFECTS[_effect]['parameters']['tempo'] = {'default': None}
 
 
 def soften_repetitions(positions, tail_frames=None):
@@ -50,7 +53,7 @@ def soften_repetitions(positions, tail_frames=None):
     return result
 
 
-def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False, release_duration=None):
+def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False, release_duration=None, tempo=None):
     """Validate/select donor VOP indices without decoding or altering their payloads.
 
     motion_start is seconds from B's first P-VOP, rounded to 24fps. Output duration
@@ -79,7 +82,13 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         raise ValueError('Motion start is outside the incoming clip.')
     if effect in ('loop-release', 'progressive-melt', 'motion-stutter', 'reset-pulse') and (offset != 0 or count < 12):
         raise ValueError('This timeline-aligned effect needs at least 0.5 seconds and motion_start=0 for a timeline-aligned exit.')
+    if tempo is not None:
+        if not isinstance(tempo,dict):raise ValueError('Invalid tempo settings.')
+        nominal=tempo_frames(effect,tempo.get('bpm'),tempo.get('beats'))
+        if loop_frames is not None and loop_frames!=nominal:raise ValueError('Tempo and movement interval differ.')
+        loop_frames=nominal
     config = {'motion_start': offset/24}
+    if tempo is not None:config['tempo']={'bpm':tempo['bpm'],'beats':tempo['beats']}
     if effect == 'reset-pulse':
         loop_frames = min(12, count-1) if loop_frames is None else loop_frames
         if type(loop_frames) is not int or not 4 <= loop_frames <= 48 or loop_frames >= count:
@@ -87,6 +96,7 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         if type(repeat) is not int or not 2 <= repeat <= 12:
             raise ValueError('repeat must be an integer from 2 through 12')
         indices = [0 if i % loop_frames == 0 else 1 + (i % loop_frames - 1) // repeat for i in range(1, count+1)]
+        if tempo is not None:indices=[i+1 for i in musical_positions(effect,count,repeat,tempo)]
         return indices, {**config, 'repeat':repeat, 'loop_frames':loop_frames}
     if effect in ('frame-melt', 'progressive-melt'):
         if type(repeat) is not int or not 2 <= repeat <= 12:
@@ -131,6 +141,8 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         config['loop_frames'] = loop_frames
     else:
         positions = list(range(count))
+    if tempo is not None:
+        positions = musical_positions(effect,count,repeat,tempo)
     if smooth:
         positions = soften_repetitions(positions, tail_frames)
         config['smooth'] = True
@@ -141,9 +153,9 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
     return [1+offset+i for i in positions], config
 
 
-def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False, release_duration=None):
+def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False, release_duration=None, tempo=None):
     """Shared compressed-domain operation used by CLI and sequence renderer."""
-    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames, smooth, release_duration)
+    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames, smooth, release_duration, tempo)
     return indices, [packets[i] for i in indices]
 
 
@@ -180,7 +192,7 @@ def process(effect, a, b, transition_duration, output, parameters=None):
     # Equal output duration across effects. Melt progresses more slowly through B.
     if count > len(bv)-1:
         raise ValueError(f'Transition too long for B: maximum {(len(bv)-1)/24:.6f}s')
-    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'), params.get('smooth', False), params.get('release_duration'))
+    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'), params.get('smooth', False), params.get('release_duration'), params.get('tempo'))
     tail = [bv[i] for i in indices]
     stream = evidence / 'effect.m4v'
     stream.write_bytes(header + b''.join(av + tail))

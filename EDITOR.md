@@ -211,3 +211,13 @@ Browser effect/export flow and widths 320–1200px were checked.
 
 The user subsequently reverted the dark experiment: the current palette is the
 original light background and subtle gray gradient. dark.png is historical.
+
+## Editor tools
+
+The Sequence row now includes undo/redo and a small Project menu. Saved projects
+reference originals by hash; keep the videos separately. The transition dialog
+contains tested starting points and expandable manual BPM timing for periodic
+effects. Each clip has an Original/B&W/negative appearance selector.
+See [EDITOR_TOOLS.md](EDITOR_TOOLS.md) for workflow and exact limits. Removed
+clips are temporarily retained for undo until the server stops, rather than
+immediately deleting their working copies.

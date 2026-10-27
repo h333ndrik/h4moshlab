@@ -30,10 +30,14 @@ def vops(path):
         raise ValueError('No MPEG-4 VOPs')
     return data[:offsets[0]], [data[a:b] for a, b in zip(offsets, offsets[1:] + [len(data)])]
 
-def normalize(source, destination, max_seconds=6):
-    """Shared, unchanged Phase 1 normalization; never edit the source."""
+LOOKS = {'original':'', 'black-white':'hue=s=0,', 'negative-bw':'hue=s=0,lutyuv=y=251-val,', 'negative-color':'format=gbrp,negate,format=yuv420p,'}
+
+def normalize(source, destination, max_seconds=6, look='original'):
+    """Normalize temporary copies; optional clip look, never edit the source."""
+    if look not in LOOKS:
+        raise ValueError('Unsupported clip look.')
     run('ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', source, *(['-t', str(max_seconds)] if max_seconds is not None else []), '-an',
-        '-vf', f'setpts=PTS-STARTPTS,scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
+        '-vf', f'setpts=PTS-STARTPTS,{LOOKS[look]}scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=24,setsar=1',
         '-c:v', 'mpeg4', '-threads', '2', '-q:v', '4', '-g', '10000', '-bf', '0', '-sc_threshold', '0',
         '-pix_fmt', 'yuv420p', '-f', 'm4v', destination)
 
