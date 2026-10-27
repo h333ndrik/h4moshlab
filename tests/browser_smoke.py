@@ -120,6 +120,8 @@ with sync_playwright() as p:
         page.locator('#export').click()
     event.value.save_as(artifacts/'sequence.mp4')
     assert (artifacts/'sequence.mp4').stat().st_size > 1000
+    expect(page.get_by_text('Download assembled MP4', exact=True)).to_have_count(0)
+    expect(page.locator('a[download]')).to_have_count(0)
     with urllib.request.urlopen(base+url) as response:
         assert response.read() == (artifacts/'sequence.mp4').read_bytes()
     page.locator('.connector').first.click()
@@ -129,7 +131,7 @@ with sync_playwright() as p:
     page.locator('.connector').first.click()
     page.locator('#duration').fill('25')
     page.get_by_role('button', name='Close settings').click()
-    expect(page.locator('#download')).to_be_hidden()
+    expect(page.locator('#download')).to_have_count(0)
     page.route('**/api/jobs', lambda route: route.fulfill(status=503, content_type='application/json', body='{"error":"Test processing failure"}'))
     page.locator('#assemble').click()
     expect(page.locator('#error')).to_have_text('Test processing failure')

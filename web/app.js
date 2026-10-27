@@ -22,7 +22,7 @@ function setting(index) {
 function invalidate() {
   try { sessionStorage.removeItem('h4-job'); } catch {}
   try { sessionStorage.setItem('h4-sequence', JSON.stringify({order: state.clips.map(c => c.id), settings: [...state.settings]})); } catch {}
-  state.ready = null; state.previewEnd = null; state.sequencePosition = 0; $('download').hidden = true;
+  state.ready = null; state.previewEnd = null; state.sequencePosition = 0;
   const clip = state.clips.find(c => c.id === state.active);
   if (clip) source(clip.preview, `Clip preview · ${clip.name}`);
   else { player.pause(); player.removeAttribute('src'); player.load(); $('empty').hidden = false; $('preview-label').textContent = 'No video selected'; }
@@ -195,7 +195,6 @@ function showResult(job) {
   const changed = player.getAttribute('src') !== job.url;
   source(job.url, 'Assembled preview · all clips and transitions');
   if (changed) seek(state.sequencePosition, null, false);
-  const download = $('download'); download.href = `${job.url}?download=1`; download.download = 'h4-mosh-lab.mp4'; download.hidden = false;
 }
 function seek(time, end, autoplay = true) {
   if (state.pendingSeek) player.removeEventListener('loadedmetadata', state.pendingSeek);
@@ -229,7 +228,10 @@ async function assemble(download = false, transitionIndex = null) {
       const boundary = state.ready.result.boundaries[transitionIndex];
       const start = boundary.frame / 24; seek(Math.max(0, start - .75), start + boundary.duration + .75);
     }
-    if (download) $('download').click();
+    if (download) {
+      const link = document.createElement('a'); link.href = `${state.ready.url}?download=1`; link.download = 'h4-mosh-lab.mp4';
+      link.hidden = true; document.body.append(link); link.click(); link.remove();
+    }
   } catch (e) { error(e.message); status('Processing failed. Adjust the sequence or retry.'); }
   finally { busy(false); $('progress').hidden = true; }
 }

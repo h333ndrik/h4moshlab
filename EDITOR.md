@@ -55,9 +55,10 @@ The cloud run was validated on Linux/Chromium; Mac/Safari has not been tested.
    video controls and HTTP byte ranges. Active cards follow assembled playback.
 5. Preview a transition from its dialog to play the corresponding region of that
    same assembled film. An unchanged sequence reuses the existing render. Clip/order
-   or transition changes invalidate it and hide the stale download link.
+   or transition changes invalidate it and require a fresh render before the next export.
 6. Export MP4 renders the current sequence if necessary, then downloads exactly the
-   same bytes as its assembled preview. Failures show an error and reenable retry.
+   same bytes as its assembled preview. Export MP4 is the only download control;
+   the duplicate download link has been removed. Failures show an error and reenable retry.
 
 Timeline order/settings survive page refresh in this browser tab. Imported clips
 and a running/completed render reconnect to the same live server session. This is
