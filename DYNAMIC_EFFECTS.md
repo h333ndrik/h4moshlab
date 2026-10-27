@@ -79,3 +79,7 @@ source hashes, distinct decoded frames, consecutive exit frames, audio sample
 counts, full output decode and existing engine regressions. Optional browser test:
 `python3 tests/browser_dynamic.py` against a fresh running server; override its
 URL with H4_EDITOR_TEST_URL if necessary.
+
+## Gentler movement option
+
+Both modes now also support boolean `smooth`; see [SMOOTH_REPETITIONS.md](SMOOTH_REPETITIONS.md). It bounds movement jumps between repeat groups. Original cadence remains available.

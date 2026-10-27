@@ -16,12 +16,19 @@ with sync_playwright() as p:
     page.locator('#files').set_input_files([str(ROOT/'samples/clip-a.mp4'),str(ROOT/'samples/clip-b.mp4')])
     expect(page.locator('#count')).to_have_text('2 clips',timeout=120000)
     expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
-    for effect in ('progressive-melt','motion-stutter'):
+    for effect in ('frame-melt','progressive-melt','motion-stutter'):
         page.locator('.connector').click()
         page.locator('#effect').select_option(effect)
         expect(page.locator('#motion-start')).to_be_disabled()
+        expect(page.locator('#smooth-control')).to_be_visible()
+        expect(page.locator('#smooth')).to_have_value('smooth')
+        if effect == 'frame-melt':
+            page.locator('#smooth').select_option('original')
+            expect(page.locator('#motion-start')).to_be_enabled()
+            page.locator('#smooth').select_option('smooth')
+            expect(page.locator('#motion-start')).to_be_disabled()
         page.locator('#duration').fill('48')
-        if effect=='progressive-melt':
+        if effect in ('frame-melt','progressive-melt'):
             expect(page.locator('#repeat-control')).to_be_visible()
             expect(page.locator('#loop-control')).to_be_hidden()
             page.locator('#repeat').fill('6')
@@ -37,6 +44,9 @@ with sync_playwright() as p:
         report=page.request.get(base+'/api/jobs/'+job).json()
         assert report['result']['boundaries'][0]['effect']==effect
         assert report['result']['boundaries'][0]['ending']=='flow'
+        assert report['result']['boundaries'][0]['parameters']['smooth'] is True
+        indices=report['result']['boundaries'][0]['b_vop_indices']
+        assert all(0<=b-a<=2 for a,b in zip(indices,indices[1:]))
         assert report['result']['boundaries'][0]['b_vop_indices'][-12:]==list(range(37,49))
         with page.expect_download() as download: page.locator('#export').click()
         target=ROOT/'work'/f'browser-{effect}.mp4'
@@ -47,4 +57,4 @@ with sync_playwright() as p:
         expect(page.locator('#status')).to_contain_text('verified full decode')
     assert not errors,errors
     browser.close()
-print('PASS: Progressive Melt and Motion Stutter settings, rendered plan, flow ending, full decode, export and Assemble return')
+print('PASS: gentler Frame Melt, Progressive Melt and Motion Stutter settings, rendered plan, flow ending, full decode, export and Assemble return')

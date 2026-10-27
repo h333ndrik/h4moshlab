@@ -75,3 +75,8 @@ block-boundary jumps may persist despite a consecutive prediction tail.
 
 Browser tab title: exactly `mosh lab` in lowercase, without h4 (already in
 the favicon). The page heading stays `h4 mosh lab`.
+
+Gentler repetition movement is implemented for Frame Melt, Progressive Melt and
+Motion Stutter. See SMOOTH_REPETITIONS.md: boolean smooth API parameter, donor
+advances bounded to two and final quarter consecutive, unchanged duration/audio.
+Keep Original cadence selectable; do not promise universally smooth distortion.

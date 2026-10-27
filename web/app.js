@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const state = {clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
+const smoothEffects = ['frame-melt', 'progressive-melt', 'motion-stutter'];
 const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter'];
 const names = {'progressive-melt': 'Progressive Melt', 'motion-stutter': 'Motion Stutter', 'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
 const notes = {'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
@@ -124,8 +125,9 @@ function clampMotion(index) {
   conf.duration = count / 24;
   conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
   conf.loop_frames = Math.max(conf.effect === 'motion-stutter' ? 4 : 2, Math.min(48, count - 1, available, Math.round(conf.loop_frames)));
-  const needed = alignedEffects.includes(conf.effect) ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
-  const maximum = alignedEffects.includes(conf.effect) ? 0 : Math.max(0, available - needed);
+  const softened = smoothEffects.includes(conf.effect) && conf.smooth;
+  const needed = alignedEffects.includes(conf.effect) || softened ? count : conf.effect === 'motion-loop' ? conf.loop_frames : conf.effect === 'frame-melt' ? Math.ceil(count / conf.repeat) : count;
+  const maximum = alignedEffects.includes(conf.effect) || softened ? 0 : Math.max(0, available - needed);
   conf.motion_start = Math.max(0, Math.min(maximum, Math.round(conf.motion_start * 24))) / 24;
   return {conf, count, needed, maximum};
 }
@@ -159,6 +161,8 @@ function motionFrame(play = false) {
 function updateDialog() {
   const {conf, needed, maximum} = clampMotion(state.dialogIndex);
   $('effect').value = conf.effect;
+  $('smooth-control').hidden = !smoothEffects.includes(conf.effect);
+  $('smooth').value = conf.smooth ? 'smooth' : 'original';
   const ending = conf.ending ?? (['frame-melt', 'motion-loop', ...alignedEffects].includes(conf.effect) ? 'flow' : 'reset');
   $('ending').value = ending;
   $('ending-control').hidden = conf.effect === 'cut';
@@ -184,9 +188,11 @@ function updateDialog() {
   $('motion-window').textContent = `${start.toFixed(2)}–${(start + needed / 24).toFixed(2)} s of the incoming clip. The rest of your sequence stays in place.`;
   motionFrame();
 }
-for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start']) $(id).addEventListener('input', () => {
+for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth']) $(id).addEventListener('input', () => {
   const conf = setting(state.dialogIndex); conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
   conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
+  if (id === 'effect') conf.smooth = smoothEffects.includes(conf.effect);
+  if (id === 'smooth') conf.smooth = $('smooth').value === 'smooth';
   if (id === 'ending') conf.ending = $('ending').value;
   clampMotion(state.dialogIndex); invalidate(); draw(); updateDialog();
 });

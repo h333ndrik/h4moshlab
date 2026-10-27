@@ -23,7 +23,31 @@ EFFECTS = {
 }
 
 
-def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None):
+SMOOTH_EFFECTS = ('frame-melt', 'progressive-melt', 'motion-stutter')
+for _effect in SMOOTH_EFFECTS:
+    EFFECTS[_effect]['parameters']['smooth'] = {'default': False}
+
+
+def soften_repetitions(positions):
+    """Bound donor advances to two; reserve a timeline-aligned consecutive tail.
+
+    Repeating predictions consumes output time. Catch-up is distributed across
+    earlier frames instead of jumping at a block boundary. Some donor frames are
+    still skipped; this is not interpolation or a perceptual smoothness guarantee.
+    """
+    count = len(positions)
+    release = count - max(1, count // 4)
+    result = []
+    previous = 0
+    for i, desired in enumerate(positions):
+        lower = max(0, release - 2 * (release - i))
+        value = i if i >= release else min(previous + 2, max(previous, desired, lower))
+        result.append(value)
+        previous = value
+    return result
+
+
+def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False):
     """Validate/select donor VOP indices without decoding or altering their payloads.
 
     motion_start is seconds from B's first P-VOP, rounded to 24fps. Output duration
@@ -35,7 +59,11 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         raise ValueError('Transition exceeds the incoming clip motion frames.')
     if type(motion_start) not in (int, float) or not math.isfinite(motion_start) or motion_start < 0:
         raise ValueError('motion_start must be a nonnegative finite number of seconds')
+    if type(smooth) is not bool or (smooth and effect not in SMOOTH_EFFECTS):
+        raise ValueError('smooth must be a boolean and is supported only for repetition effects.')
     offset = round(motion_start*24)
+    if smooth and offset != 0:
+        raise ValueError('Smooth repetition requires motion_start=0 for a timeline-aligned exit.')
     available = frame_count-1-offset
     if available < 1:
         raise ValueError('Motion start is outside the incoming clip.')
@@ -85,14 +113,17 @@ def prediction_plan(frame_count, effect, count, repeat=4, motion_start=0, loop_f
         config['loop_frames'] = loop_frames
     else:
         positions = list(range(count))
+    if smooth:
+        positions = soften_repetitions(positions)
+        config['smooth'] = True
     if max(positions) >= available:
         raise ValueError('Selected motion range is too short; move its start earlier or shorten the effect.')
     return [1+offset+i for i in positions], config
 
 
-def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None):
+def prediction_tail(packets, effect, count, repeat=4, motion_start=0, loop_frames=None, smooth=False):
     """Shared compressed-domain operation used by CLI and sequence renderer."""
-    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames)
+    indices, _ = prediction_plan(len(packets), effect, count, repeat, motion_start, loop_frames, smooth)
     return indices, [packets[i] for i in indices]
 
 
@@ -129,7 +160,7 @@ def process(effect, a, b, transition_duration, output, parameters=None):
     # Equal output duration across effects. Melt progresses more slowly through B.
     if count > len(bv)-1:
         raise ValueError(f'Transition too long for B: maximum {(len(bv)-1)/24:.6f}s')
-    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'))
+    indices, config = prediction_plan(len(bv), effect, count, repeat, params.get('motion_start', 0), params.get('loop_frames'), params.get('smooth', False))
     tail = [bv[i] for i in indices]
     stream = evidence / 'effect.m4v'
     stream.write_bytes(header + b''.join(av + tail))
@@ -166,9 +197,12 @@ if __name__ == '__main__':
     parser.add_argument('--motion-start', type=float, default=0, help='Seconds into B motion (first P-VOP = zero)')
     parser.add_argument('--loop-frames', type=int, help='Loop/Release/Stutter: group or pulse size in frames')
     parser.add_argument('--repeat', type=int, help='Frame/Progressive Melt: initial P-VOP repetition count')
+    parser.add_argument('--smooth', action='store_true', help='Gentler Frame/Progressive Melt or Stutter cadence; requires motion-start=0')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     parameters = {'motion_start': args.motion_start}
+    if args.smooth:
+        parameters['smooth'] = True
     if args.repeat is not None:
         parameters['repeat'] = args.repeat
     if args.loop_frames is not None:

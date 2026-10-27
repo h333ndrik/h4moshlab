@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 import subprocess
 
-from effects import EFFECTS, prediction_plan
+from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
 from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args
 from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
 
@@ -56,7 +56,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
             ending_mode(transition)
             if type(duration) not in (int, float) or not math.isfinite(duration) or not 1/FPS <= duration <= min(6, (clip['frames']-1)/FPS):
                 raise ValueError('Transition duration exceeds the incoming clip (maximum 6s).')
-            prediction_plan(clip['frames'], effect, round(duration*FPS), repeat, transition.get('motion_start', 0), transition.get('loop_frames'))
+            prediction_plan(clip['frames'], effect, round(duration*FPS), repeat, transition.get('motion_start', 0), transition.get('loop_frames'), transition.get('smooth', False) if effect in SMOOTH_EFFECTS else False)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     stream = directory/'sequence.m4v'
@@ -75,7 +75,8 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None)
                 count = round(transition['duration']*FPS)
                 ending = ending_mode(transition)
                 indices, config = prediction_plan(len(packets), transition['effect'], count, transition.get('repeat', 4),
-                                                 transition.get('motion_start', 0), transition.get('loop_frames'))
+                                                 transition.get('motion_start', 0), transition.get('loop_frames'),
+                                                 transition.get('smooth', False) if transition['effect'] in SMOOTH_EFFECTS else False)
                 tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
                                    'motion_start': config['motion_start'], 'parameters': config, 'ending': ending,
