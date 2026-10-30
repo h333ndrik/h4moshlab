@@ -382,3 +382,17 @@ $('copy-phone').onclick = async () => {
     $('phone-status').textContent = ' Copy the full Phone link from the Mac terminal.';
   }
 };
+
+const visitButton = $('visit');
+let visitCount = 0;
+try {
+  const saved = Number(localStorage.getItem('h4-visit-count'));
+  if (Number.isSafeInteger(saved) && saved >= 0) visitCount = saved;
+} catch {}
+function showVisitCount() { visitButton.textContent = `visit ${String(visitCount).padStart(4, '0')}`; }
+showVisitCount();
+visitButton.onclick = () => {
+  visitCount += 1;
+  try { localStorage.setItem('h4-visit-count', String(visitCount)); } catch {}
+  showVisitCount();
+};
