@@ -122,8 +122,8 @@ function upload(file, index, total) {
     xhr.send(file);
   });
 }
-$('files').onchange = async event => {
-  const files = [...event.target.files]; event.target.value = ''; if (!files.length) return;
+async function importFiles(files) {
+  files = [...files]; if (state.busy || !files.length) return;
   finishEdit();beginEdit();error(); busy(true); $('progress').hidden = false;
   try {
     if (state.clips.length + files.length > 12) throw new Error('Choose at most 12 clips in total.');
@@ -133,7 +133,36 @@ $('files').onchange = async event => {
     }
     status('Clips ready. Choose transitions, then assemble the preview.');
   } catch (e) { error(e.message); status('Import failed. See the message below; you can retry.'); } finally { busy(false); $('progress').hidden = true; finishEdit(); }
+}
+$('files').onchange = event => {
+  const files = [...event.target.files]; event.target.value = ''; return importFiles(files);
 };
+const importArea = document.querySelector('main');
+importArea.addEventListener('dragover', event => {
+  if (event.target.closest('.clip') || ![...(event.dataTransfer?.types || [])].includes('Files')) return;
+  event.preventDefault(); event.dataTransfer.dropEffect = state.busy ? 'none' : 'copy';
+});
+importArea.addEventListener('drop', event => {
+  if (event.target.closest('.clip')) return;
+  const files = [...(event.dataTransfer?.files || [])]; if (!files.length) return;
+  event.preventDefault(); importFiles(files);
+});
+window.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || ![' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  if (document.activeElement?.closest('input,select,textarea,[contenteditable=true]')) return;
+  const dialog = document.querySelector('dialog[open]');
+  const video = dialog ? (dialog.id === 'transition-dialog' ? $('motion-preview') : null) : player;
+  if (!video || !video.getAttribute('src') || video.readyState < 1 || !Number.isFinite(video.duration) ||
+      video.closest('[hidden],details:not([open])') || !video.getClientRects().length) return;
+  if (event.key === ' ') {
+    event.preventDefault();
+    if (video.paused) video.play().catch(e => error(`Preview: ${e.message}`)); else video.pause();
+  } else {
+    const next = Math.max(0, Math.min(video.duration, video.currentTime + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 1 : 1/24)));
+    if (next === video.currentTime) return;
+    event.preventDefault(); video.currentTime = next;
+  }
+});
 function clampMotion(index) {
   const conf = setting(index), available = state.clips[index + 1].frames - 1;
   const minimum = alignedEffects.includes(conf.effect) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;

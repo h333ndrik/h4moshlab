@@ -2,10 +2,12 @@
 Requires Playwright + Chromium only for development tests, not the application.
 """
 from pathlib import Path
+import base64
 import json
 import os
 import re
 import hashlib
+import mimetypes
 import sys
 import shutil
 import subprocess
@@ -21,6 +23,21 @@ artifacts = ROOT/'work/browser-smoke'
 artifacts.mkdir(parents=True, exist_ok=True)
 base = os.environ.get('H4_EDITOR_TEST_URL', 'http://127.0.0.1:8765')
 expected_audio = any(json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','a:0','-show_entries','stream=codec_name','-of','json',f]))['streams'] for f in files[:3])
+
+def drop_video(page, target, path):
+    path = Path(path)
+    transfer = page.evaluate_handle("""({name,content,type}) => {
+        const data = new DataTransfer();
+        data.items.add(new File([Uint8Array.from(atob(content), c=>c.charCodeAt(0))], name, {type}));
+        return data;
+    }""", {'name':path.name, 'content':base64.b64encode(path.read_bytes()).decode(),
+             'type':mimetypes.guess_type(path)[0] or 'application/octet-stream'})
+    try:
+        page.locator(target).dispatch_event('dragover', {'dataTransfer':transfer})
+        page.locator(target).dispatch_event('drop', {'dataTransfer':transfer})
+    finally:
+        transfer.dispose()
+
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=shutil.which('chromium'))
     page = browser.new_page(viewport={'width': 1200, 'height': 1000}, accept_downloads=True)
@@ -28,9 +45,52 @@ with sync_playwright() as p:
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto(base)
     expect(page.locator('#files')).to_be_enabled()
-    page.locator('#files').set_input_files(files[:3])
+    # Hold an actual upload to prove a second drop is ignored while importing.
+    held = []
+    def hold_upload(route):
+        held.append(route)
+    page.route('**/api/clips', hold_upload)
+    with page.expect_request(lambda r:r.method=='POST' and r.url.endswith('/api/clips')):
+        drop_video(page, '#empty', files[0])
+    expect(page.locator('#files')).to_be_disabled()
+    drop_video(page, 'main', files[1])
+    assert len(held) == 1
+    held[0].continue_()
+    page.unroute('**/api/clips', hold_upload)
+    expect(page.locator('#count')).to_have_text('1 clip', timeout=120000)
+    expect(page.locator('#files')).to_be_enabled(timeout=120000)
+    # Cards remain reorder targets, not file-import drop zones.
+    drop_video(page, '.clip', files[1])
+    expect(page.locator('#files')).to_be_enabled()
+    expect(page.locator('#count')).to_have_text('1 clip')
+    page.locator('#files').set_input_files(files[1:3])
     expect(page.locator('#count')).to_have_text('3 clips', timeout=120000)
     expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    page.locator('h1').click()
+    page.keyboard.press('Control+z')
+    expect(page.locator('#count')).to_have_text('1 clip', timeout=120000)
+    expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    page.keyboard.press('Control+Shift+z')
+    expect(page.locator('#count')).to_have_text('3 clips', timeout=120000)
+    expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    page.wait_for_function('document.querySelector("#player").readyState >= 2')
+    page.keyboard.press('Space')
+    page.wait_for_function('!document.querySelector("#player").paused')
+    page.keyboard.press('Space')
+    page.wait_for_function('document.querySelector("#player").paused')
+    page.locator('#player').evaluate('v=>{v.currentTime=Math.min(.5,v.duration/4)}')
+    page.wait_for_function('!document.querySelector("#player").seeking')
+    start = page.locator('#player').evaluate('v=>v.currentTime')
+    page.keyboard.press('ArrowRight')
+    page.wait_for_function('!document.querySelector("#player").seeking')
+    assert abs(page.locator('#player').evaluate('v=>v.currentTime') - start - 1/24) < .000001
+    page.keyboard.press('ArrowLeft')
+    page.wait_for_function('!document.querySelector("#player").seeking')
+    assert abs(page.locator('#player').evaluate('v=>v.currentTime') - start) < .000002
+    page.keyboard.press('Shift+ArrowRight')
+    page.wait_for_function('!document.querySelector("#player").seeking')
+    expected = min(start+1, page.locator('#player').evaluate('v=>v.duration'))
+    assert abs(page.locator('#player').evaluate('v=>v.currentTime') - expected) < .000002
     original_order = page.locator('.clip-select span').all_text_contents()
     page.get_by_role('button', name=f'Move {Path(files[0]).name} right', exact=True).click()
     assert page.locator('.clip-select span').all_text_contents()[1].endswith(Path(files[0]).name)
@@ -64,6 +124,15 @@ with sync_playwright() as p:
     expect(page.locator('#motion-start-value')).to_have_text('0.54 s')
     page.locator('#watch-motion').click()
     page.wait_for_function('document.querySelector("#motion-preview").currentTime > .56')
+    page.keyboard.press('Space')
+    page.wait_for_function('document.querySelector("#motion-preview").paused')
+    page.wait_for_function('!document.querySelector("#motion-preview").seeking')
+    start = page.locator('#motion-preview').evaluate('v=>v.currentTime')
+    main_time = page.locator('#player').evaluate('v=>v.currentTime')
+    page.keyboard.press('ArrowRight')
+    page.wait_for_function('!document.querySelector("#motion-preview").seeking')
+    assert abs(page.locator('#motion-preview').evaluate('v=>v.currentTime') - start - 1/24) < .000001
+    assert page.locator('#player').evaluate('v=>v.currentTime') == main_time
     page.get_by_role('button', name='Close settings').click()
     expect(page.locator('#motion-preview')).not_to_have_attribute('src', re.compile('.+'))
     page.locator('.connector').nth(1).click()
@@ -192,4 +261,5 @@ try:
 except urllib.error.HTTPError as e:
     assert e.code == 403
 print(json.dumps({'browser': 'chromium', 'clips': 3, 'duration': duration, 'javascript_errors': errors,
+                  'drop_import_busy_card_exclusion_preview_keys_frame_step_undo_redo': 'passed',
                   'upload_reorder_settings_reload_render_scrub_transition_preview_download_error_retry_remove_ranges': 'passed'}))
