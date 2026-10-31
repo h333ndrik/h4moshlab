@@ -7,6 +7,13 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from sequence import prepare, render
 from mosh import digest, probe, run, vops
+from server import App, handler_for
+from http.server import ThreadingHTTPServer
+from http.client import HTTPConnection
+import json
+import subprocess
+import threading
+import time
 
 
 class SequenceTests(unittest.TestCase):
@@ -100,6 +107,63 @@ class SequenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 render(self.clips[:2], transitions, self.root/'invalid')
         self.assertFalse((self.root/'invalid').exists())
+
+    def test_duplicate_source_http_render_restore_and_timeline_limit(self):
+        app=App(self.root/'duplicate-api');app.root.mkdir()
+        identifier='a'*32
+        app.clips[identifier]={**self.clips[1], 'id':identifier, 'name':'same.mp4'}
+        app.views[(identifier,'original')]=dict(app.clips[identifier])
+        server=ThreadingHTTPServer(('127.0.0.1',0),handler_for(app))
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def request(path,body=None):
+            connection=HTTPConnection('127.0.0.1',server.server_port)
+            connection.request('POST' if body is not None else 'GET',path,json.dumps(body) if body is not None else None,{'Content-Type':'application/json'})
+            response=connection.getresponse();status=response.status;data=json.loads(response.read());connection.close()
+            return status,data
+        try:
+            self.assertEqual(request('/api/sequence/restore',{'clips':[identifier]*2,'looks':['original','negative-bw']})[0],200)
+            self.assertEqual(len(app.clips),1)
+            self.assertEqual(request('/api/sequence/restore',{'clips':[identifier]*13})[0],400)
+            self.assertEqual(request('/api/jobs',{'clips':[identifier]*13,'transitions':[{'effect':'cut'}]*12})[0],400)
+            status,job=request('/api/jobs',{'clips':[identifier]*2,'looks':['original','negative-bw'],'transitions':[{'effect':'classic-mosh','duration':.5}]})
+            self.assertEqual(status,202)
+            deadline=time.monotonic()+90
+            while time.monotonic()<deadline:
+                _,result=request('/api/jobs/'+job['id'])
+                if result['status']!='processing':break
+                time.sleep(.02)
+            self.assertEqual(result['status'],'ready',result)
+            self.assertEqual(result['result']['frames'],95)
+            self.assertEqual(result['result']['full_decode'],'passed')
+            self.assertEqual(result['result']['source_sha256'],[self.clips[1]['sha256']]*2)
+            self.assertEqual(len(app.clips),1)
+            self.assertEqual(digest(Path(self.clips[1]['source'])),self.clips[1]['sha256'])
+            # The maximum counts timeline entries, not source files.
+            status,job=request('/api/jobs',{'clips':[identifier]*12,'transitions':[{'effect':'cut'}]*11})
+            self.assertEqual(status,202)
+        finally:
+            server.shutdown();server.server_close();thread.join();app.pool.shutdown(wait=True)
+
+    def test_duplicate_project_refs_and_legacy_hash_matching(self):
+        script="""
+const assert=require('node:assert/strict');
+const {validateProject,matchProject}=require('./web/editor-tools.js');
+const hash='a'.repeat(64),clip={name:'renamed.mov',sha256:hash,frames:48};
+const project={format:'h4-mosh-project',version:1,sound:true,clips:[{...clip,source_ref:0},{...clip,source_ref:0}],transitions:[{effect:'classic-mosh',duration:.5}]};
+const saved=validateProject(JSON.parse(JSON.stringify(project)));
+assert.deepEqual(saved.clips.map(c=>c.source_ref),[0,0]);
+assert.deepEqual(matchProject(saved,[{id:'one',sha256:hash}]).map(c=>c.id),['one','one']);
+assert.deepEqual(matchProject(saved,[{id:'wrong',sha256:'b'.repeat(64)}]),[null,null]);
+const legacy=validateProject({...project,clips:[clip,clip]});
+assert.equal(matchProject(legacy,[{id:'one',sha256:hash}])[1],null);
+assert.throws(()=>validateProject({...project,clips:[{...clip,source_ref:1},clip]}));
+const ordered=validateProject({...project,order:['c'.repeat(32),'c'.repeat(32)],clips:[clip,clip]});
+assert.deepEqual(ordered.order,['c'.repeat(32),'c'.repeat(32)]);
+assert.deepEqual(matchProject(ordered,[{id:'one',sha256:hash}]).map(c=>c.id),['one','one']);
+assert.throws(()=>validateProject({...project,order:['c'.repeat(32)]}));
+
+"""
+        subprocess.run(['node','-e',script],cwd=Path(__file__).resolve().parents[1],check=True)
 
 if __name__ == '__main__':
     unittest.main()

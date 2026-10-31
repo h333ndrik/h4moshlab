@@ -8,6 +8,13 @@ const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter', 'r
 const names = {'reset-pulse': 'Reset Pulse', 'progressive-melt': 'Progressive Melt', 'motion-stutter': 'Motion Stutter', 'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
 const notes = {'reset-pulse': 'Real codec datamoshing: the first clear frame of the incoming video flashes back at each pulse; repeated prediction frames distort it again. Intentionally rhythmic, not a smooth dissolve.', 'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
+const clipSource = clip => clip.source_id || clip.id;
+const newEntryId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+let copiedSettings = null;
+let altDown = false;
+window.addEventListener('keydown', event => { if(event.key==='Alt')altDown=true; });
+window.addEventListener('keyup', event => { if(event.key==='Alt')altDown=false; });
+window.addEventListener('blur', () => { altDown=false; });
 const touchUI = () => window.matchMedia('(pointer:coarse)').matches;
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message) { $('status').textContent = message; }
@@ -25,7 +32,7 @@ function setting(index) {
 }
 function invalidate() {
   try { sessionStorage.removeItem('h4-job'); } catch {}
-  try { sessionStorage.setItem('h4-sequence', JSON.stringify({order: state.clips.map(c => c.id), settings: [...state.settings]})); } catch {}
+  try { sessionStorage.setItem('h4-sequence', JSON.stringify({order: state.clips.map(c => c.id), entries: state.clips, settings: [...state.settings]})); } catch {}
   state.ready = null; state.previewEnd = null; state.sequencePosition = 0;
   const clip = state.clips.find(c => c.id === state.active);
   if (clip) source(clip.preview, `Clip preview · ${clip.name}`);
@@ -40,7 +47,9 @@ function controls() {
   $('import-label').style.pointerEvents = state.busy ? 'none' : '';
   $('import-label').setAttribute('aria-disabled', String(state.busy));
   document.querySelectorAll('.clip-look').forEach(select=>select.disabled=state.busy);
-  document.querySelectorAll('#timeline button').forEach(b => b.disabled = state.busy || b.dataset.boundary === 'true');
+  document.querySelectorAll('.clip').forEach(card=>card.draggable=!state.busy&&!touchUI());
+  document.querySelectorAll('#timeline button').forEach(b => b.disabled = state.busy || b.dataset.boundary === 'true' || (b.dataset.duplicate === 'true' && state.clips.length >= 12));
+  if(state.dialogIndex!==null && state.clips[state.dialogIndex+1])updatePasteControl();
   $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length;
 }
 function busy(value) { state.busy = value; controls(); }
@@ -59,9 +68,9 @@ function draw() {
     }
     const card = document.createElement('div'); card.className = `clip${state.active === clip.id ? ' active' : ''}`;
     card.draggable = !state.busy && !touchUI();
-    card.ondragstart = event => { if (state.busy) return event.preventDefault(); event.dataTransfer.setData('text/plain', clip.id); };
-    card.ondragover = event => event.preventDefault();
-    card.ondrop = event => { event.preventDefault(); move(event.dataTransfer.getData('text/plain'), index); };
+    card.ondragstart = event => { if (state.busy) return event.preventDefault(); event.dataTransfer.setData('text/plain', clip.id); event.dataTransfer.effectAllowed='copyMove'; event.dataTransfer.setData('application/x-h4-drag-mode',altDown?'copy':'move'); };
+    card.ondragover = event => { event.preventDefault(); event.dataTransfer.dropEffect=altDown?'copy':'move'; };
+    card.ondrop = event => { event.preventDefault(); event.stopPropagation(); const id=event.dataTransfer.getData('text/plain'); if(altDown)duplicateClip(id,index); else move(id,index); };
     const select = button('', () => { state.active = clip.id; state.previewEnd = null; source(clip.preview, `Clip preview · ${clip.name}`); draw(); }, `Select ${clip.name}`);
     select.className = 'clip-select'; select.setAttribute('aria-pressed', String(state.active === clip.id));
     const img = document.createElement('img'); img.src = clip.thumbnail; img.alt = ''; img.draggable = false;
@@ -71,8 +80,9 @@ function draw() {
     const left = button('←', () => move(clip.id, index - 1), `Move ${clip.name} left`);
     const right = button('→', () => move(clip.id, index + 1), `Move ${clip.name} right`);
     left.dataset.boundary = String(index === 0); right.dataset.boundary = String(index === state.clips.length - 1);
+    const duplicate = button('⧉', () => duplicateClip(clip.id), `Duplicate ${clip.name}`); duplicate.dataset.duplicate='true';
     const duration = document.createElement('small'); duration.textContent = `${clip.duration.toFixed(2)}s`;
-    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);card.append(look);timeline.append(card);
+    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);look.style.minWidth='0'; const appearance=document.createElement('div');appearance.className='clip-controls';appearance.append(look,duplicate);card.append(appearance);timeline.append(card);
   });
   document.querySelector('.sequence > .hint').textContent = touchUI() ? 'Swipe to browse clips. Use the arrows to reorder. Tap a connector to set a transition.' : 'Drag clips to reorder, or use the arrows. Select the connector between clips to set a transition.';
   controls();
@@ -91,7 +101,8 @@ async function request(url, options = {}) {
 async function remove(id) {
   if (state.busy) return; busy(true); error();
   try {
-    await request(`/api/clips/${id}`, {method: 'DELETE'});
+    const clip=state.clips.find(c=>c.id===id); if(!clip)return;
+    if(!state.clips.some(c=>c.id!==id && clipSource(c)===clipSource(clip))) await request(`/api/clips/${clipSource(clip)}`, {method: 'DELETE'});
     finishEdit();beginEdit();state.clips = state.clips.filter(c => c.id !== id);
     for (const key of state.settings.keys()) if (key.split('|').includes(id)) state.settings.delete(key);
     if (state.active === id) state.active = state.clips[0]?.id || null;
@@ -203,6 +214,7 @@ function updateDialog() {
   const start = conf.motion_start + 1 / 24;
   $('motion-start-value').value = `${start.toFixed(2)} s`;
   $('motion-window').textContent = `${start.toFixed(2)}–${(start + needed / 24).toFixed(2)} s of the incoming clip. The rest of your sequence stays in place.`;
+  updatePasteControl();
   motionFrame();
 }
 for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release']) $(id).addEventListener('input', () => {
@@ -252,7 +264,7 @@ async function assemble(download = false, transitionIndex = null) {
   try {
     if (!state.ready) {
       $('progress').hidden = false; $('progress').value = 0; status('Preparing sequence…');
-      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(c => c.id), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
+      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(clipSource), looks:state.clips.map(c=>c.look||'original'), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
       state.job = job.id;
       try { sessionStorage.setItem('h4-job', job.id); } catch {}
       state.ready = await waitForJob(job.id);
@@ -298,7 +310,7 @@ async function previewTransition(index, smoothOverride = null) {
     let result = transitionCache.get(key);
     if (!result) {
       status('Preparing short transition preview…');
-      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(c=>c.id),transitions,audio:state.sound,preview_boundary:index})});
+      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(clipSource),looks:state.clips.map(c=>c.look||'original'),transitions,audio:state.sound,preview_boundary:index})});
       result = await waitForJob(job.id);
       if (transitionCache.size >= 12) transitionCache.delete(transitionCache.keys().next().value);
       transitionCache.set(key,result);
@@ -342,6 +354,41 @@ player.addEventListener('timeupdate', () => {
 });
 player.addEventListener('error', () => { if (player.getAttribute('src')) error('Preview could not be loaded. Try assembling again or download the MP4.'); });
 window.addEventListener('beforeunload', () => { $('motion-preview').pause(); $('motion-preview').removeAttribute('src'); $('motion-preview').load(); abort.abort(); player.pause(); player.removeAttribute('src'); player.load(); });
+
+function pasteProblem(conf, frames) {
+  if(!conf)return 'Copy transition settings first.';
+  if(conf.effect==='cut')return '';
+  const count=Math.round(conf.duration*24),offset=Math.round((conf.motion_start||0)*24),available=frames-1-offset;
+  if(!Number.isFinite(conf.duration) || count<1 || conf.duration>6 || count>frames-1)return 'The incoming clip is too short for these settings.';
+  const aligned=alignedEffects.includes(conf.effect)||(smoothEffects.includes(conf.effect)&&conf.smooth);
+  if(aligned && (count<12 || offset!==0))return 'Timeline-aligned effects need at least 0.5s and motion start 0.';
+  const loop=['motion-loop','loop-release','motion-stutter','reset-pulse'].includes(conf.effect);
+  const minimum=['motion-stutter','reset-pulse'].includes(conf.effect)?4:2;
+  if(loop && (!Number.isInteger(conf.loop_frames)||conf.loop_frames<minimum||conf.loop_frames>48||conf.loop_frames>=count))return 'The motion window must be shorter than the effect.';
+  const period=conf.tempo ? 24*60/conf.tempo.bpm*conf.tempo.beats : null;
+  const needed=aligned ? count : conf.effect==='motion-loop' ? (period ? Math.ceil(period) : conf.loop_frames) : conf.effect==='frame-melt' ? Math.ceil(count/(conf.repeat||4)) : count;
+  if(offset<0 || needed>available)return 'The motion window exceeds the incoming clip.';
+  if(conf.release_duration!=null && conf.smooth && (Math.round(conf.release_duration*24)<1 || Math.round(conf.release_duration*24)>Math.max(1,Math.floor(count/2))))return 'The release exceeds half the effect duration.';
+  return '';
+}
+function updatePasteControl() {
+  const problem=pasteProblem(copiedSettings,state.clips[state.dialogIndex+1].frames);
+  $('paste-settings').disabled=state.busy||Boolean(problem);$('paste-settings').title=problem||'Paste copied transition settings';
+  $('copy-settings').disabled=state.busy;
+}
+$('copy-settings').onclick=()=>{
+  copiedSettings=H4EditorTools.copy(setting(state.dialogIndex));delete copiedSettings.random_seed;delete copiedSettings.audio_follow;
+  updatePasteControl();status('Transition settings copied.');
+};
+$('paste-settings').onclick=()=>{
+  if(state.busy||pasteProblem(copiedSettings,state.clips[state.dialogIndex+1].frames))return;
+  finishEdit();beginEdit();const target=setting(state.dialogIndex),local={};
+  for(const key of ['random_seed','audio_follow'])if(key in target)local[key]=target[key];
+  state.settings.set(`${state.clips[state.dialogIndex].id}|${state.clips[state.dialogIndex+1].id}`,{...H4EditorTools.copy(copiedSettings),...local});
+  invalidate();draw();updateDialog();finishEdit();
+};
+
+
 async function restore() {
   busy(true);
   try {
@@ -355,8 +402,10 @@ async function restore() {
     const saved = JSON.parse(sessionStorage.getItem('h4-sequence') || 'null');
     if (saved) {
       const byId = new Map(state.clips.map(c => [c.id, c]));
-      const ordered = saved.order.map(id => byId.get(id)).filter(Boolean);
-      state.clips = [...ordered, ...state.clips.filter(c => !saved.order.includes(c.id))];
+      const entries = new Map((saved.entries || []).map(c=>[c.id,c]));
+      const ordered = saved.order.map(id => { const entry=entries.get(id), source=byId.get(entry ? clipSource(entry) : id); return source && (entry ? {...source,...entry} : source); }).filter(Boolean);
+      state.clips = [...ordered, ...state.clips.filter(c => !ordered.some(entry=>clipSource(entry)===c.id))];
+      state.active=state.clips[0]?.id || null;
       const valid = new Set(state.clips.map(c => c.id));
       state.settings = new Map(saved.settings.filter(([key]) => key.split('|').every(id => valid.has(id))));
     }

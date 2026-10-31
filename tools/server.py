@@ -158,13 +158,18 @@ def handler_for(app):
                             return self.send_json(200,{'loop_frames':frames,'actual_seconds':frames/24,'target_seconds':60/body['bpm']*body['beats']})
                         raise ValueError('Unknown editor setting.')
                     ids=body['clips']
-                    if not isinstance(ids,list) or len(ids)>12 or len(ids)!=len(set(ids)) or not all(isinstance(i,str) for i in ids):
-                        raise ValueError('Choose up to 12 distinct clips.')
+                    if not isinstance(ids,list) or len(ids)>12 or not all(isinstance(i,str) for i in ids):
+                        raise ValueError('Choose up to 12 timeline clips.')
                     with app.lock:library={**app.archived,**app.clips}
                     if any(i not in library for i in ids):raise ValueError('This session no longer has the project media. Import the original videos.')
                     looks=body.get('looks',{})
-                    if not isinstance(looks,dict) or any(v not in LOOKS for v in looks.values()):raise ValueError('Invalid project clip looks.')
-                    restored={i:app.view_clip(library[i],looks.get(i,library[i].get('look','original'))) for i in ids}
+                    if isinstance(looks,list):
+                        if len(looks)!=len(ids) or any(not isinstance(v,str) or v not in LOOKS for v in looks):raise ValueError('Invalid project clip looks.')
+                        views=[app.view_clip(library[i],look) for i,look in zip(ids,looks)]
+                        restored=dict(zip(ids,views))
+                    else:
+                        if not isinstance(looks,dict) or any(not isinstance(v,str) or v not in LOOKS for v in looks.values()):raise ValueError('Invalid project clip looks.')
+                        restored={i:app.view_clip(library[i],looks.get(i,library[i].get('look','original'))) for i in ids}
                     with app.lock:
                         app.clips=restored
                         app.archived={i:c for i,c in library.items() if i not in app.clips}
@@ -175,8 +180,8 @@ def handler_for(app):
                     raise ValueError('Invalid sequence request.')
                 body = json.loads(self.rfile.read(length))
                 ids, transitions = body['clips'], body['transitions']
-                if not isinstance(ids, list) or not 1 <= len(ids) <= 12 or len(ids) != len(set(ids)):
-                    raise ValueError('Choose 1–12 distinct clips.')
+                if not isinstance(ids, list) or not 1 <= len(ids) <= 12 or not all(isinstance(i,str) for i in ids):
+                    raise ValueError('Choose 1–12 timeline clips.')
                 if not isinstance(transitions, list) or len(transitions) != len(ids)-1 or not all(isinstance(t, dict) for t in transitions):
                     raise ValueError('One transition setting is needed per boundary.')
                 include_audio = body.get('audio', True)
@@ -185,7 +190,10 @@ def handler_for(app):
                 preview = body.get('preview_boundary')
                 if preview is not None and (type(preview) is not int or not 0 <= preview < len(transitions)):
                     raise ValueError('Choose a valid transition to preview.')
-                clips = [dict(app.clips[i]) for i in ids]
+                looks=body.get('looks')
+                if looks is not None and (not isinstance(looks,list) or len(looks)!=len(ids) or any(not isinstance(v,str) or v not in LOOKS for v in looks)):
+                    raise ValueError('One supported look is needed per timeline clip.')
+                clips = [app.view_clip(app.clips[i],looks[n]) if looks is not None else dict(app.clips[i]) for n,i in enumerate(ids)]
                 job_id = uuid.uuid4().hex
                 with app.lock:
                     app.jobs[job_id] = {'id': job_id, 'status': 'processing', 'stage': 'Preparing sequence', 'progress': 0}
