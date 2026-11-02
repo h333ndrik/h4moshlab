@@ -7,7 +7,7 @@ import subprocess
 from editor_options import validate_tempo
 
 from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
-from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args, trim_audio
+from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args, trim_audio, speed_audio
 from mosh import WIDTH, HEIGHT, digest, probe, run, vops, LOOKS
 
 FPS = 24
@@ -20,13 +20,30 @@ def trim_bounds(frames, start_frame=0, end_frame=None):
     return start_frame, end_frame
 
 
+def speed_bounds(speed):
+    if type(speed) not in (int,float) or not math.isfinite(speed):
+        raise ValueError('Speed must be a number from 0.1x to 4.0x in 0.1 steps.')
+    value=round(float(speed),1)
+    if abs(float(speed)-value)>1e-9 or not .1<=value<=4:
+        raise ValueError('Speed must be a number from 0.1x to 4.0x in 0.1 steps.')
+    return value
+
+
+def speed_frame_count(frames, speed):
+    speed=speed_bounds(speed)
+    count=int(math.floor(frames/speed+.5))
+    if not 2<=count<=2880:
+        raise ValueError('Speed must keep the clip between 2 frames and 120 seconds.')
+    return count
+
+
 def frame_count(source):
     output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-i',str(source),'-map','0:v:0',
         '-vf','setpts=PTS-STARTPTS,fps=24','-an','-fps_mode','passthrough','-progress','pipe:1','-nostats','-f','null','-'],text=True)
     return int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
 
 
-def prepare(source, directory, look='original', start_frame=0, end_frame=None, base=None):
+def prepare(source, directory, look='original', start_frame=0, end_frame=None, base=None, speed=1.0):
     directory=Path(directory)
     directory.mkdir(parents=True,exist_ok=True)
     metadata=probe(source)
@@ -35,8 +52,9 @@ def prepare(source, directory, look='original', start_frame=0, end_frame=None, b
     if not videos or not math.isfinite(duration) or not 0<duration<=120:
         raise ValueError('Use a video between 0 and 120 seconds.')
     if look not in LOOKS:raise ValueError('Unsupported clip look.')
+    speed=speed_bounds(speed)
     source_frames=base.get('source_frames',base['frames']) if base is not None else None
-    if source_frames is None and (start_frame!=0 or end_frame is not None):source_frames=frame_count(source)
+    if source_frames is None and (start_frame!=0 or end_frame is not None or speed!=1):source_frames=frame_count(source)
     if source_frames is not None:start_frame,end_frame=trim_bounds(source_frames,start_frame,end_frame)
     elif type(start_frame) is not int:raise ValueError('Trim markers must be integers.')
     # Trim at 24fps without a look, then normalize geometry into a lossless cache.
@@ -54,23 +72,36 @@ def prepare(source, directory, look='original', start_frame=0, end_frame=None, b
         if source_frames is None:source_frames=count;end_frame=count
         start_frame,end_frame=trim_bounds(source_frames,start_frame,end_frame)
         if count!=end_frame-start_frame:raise ValueError('Trim did not retain the requested frame range.')
+    working=lossless
+    frames=end_frame-start_frame
+    if speed!=1:
+        # Trim first on the source grid, then retime the lossless trim. The
+        # 24fps resample yields the exact output budget used by audio/history.
+        frames=speed_frame_count(frames,speed)
+        working=directory/f'normalized-speed-{speed:g}.mkv'
+        output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-y','-i',str(lossless),'-an',
+            '-vf',f'setpts=(PTS-STARTPTS)/{speed:g},fps={FPS},setpts=PTS-STARTPTS',
+            '-c:v','ffv1','-threads','2','-fps_mode','passthrough','-progress','pipe:1','-nostats',str(working)],text=True)
+        count=int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
+        if count!=frames:raise ValueError('Speed did not retain the calculated frame count.')
     normalized=directory/'clip.m4v'
     # Use the complete existing normalization configuration after the separate
-    # trim stage. Reject any stream that violates the strict one-I/all-P invariant.
-    run('ffmpeg','-v','error','-nostdin','-y','-i',lossless,'-an',
+    # trim and speed stages. Reject anything outside the strict I/P invariant.
+    run('ffmpeg','-v','error','-nostdin','-y','-i',working,'-an',
         '-vf',f'{LOOKS[look]}pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
         '-c:v','mpeg4','-threads','2','-q:v','4','-g','10000','-bf','0','-sc_threshold','0',
         '-fps_mode','passthrough','-f','m4v',normalized)
     _,packets=vops(normalized)
-    if len(packets)!=end_frame-start_frame or [p[4]>>6 for p in packets]!=[0]+[1]*(len(packets)-1):
+    if len(packets)!=frames or [p[4]>>6 for p in packets]!=[0]+[1]*(len(packets)-1):
         raise ValueError('Trim normalization must retain at least two frames with one initial I and subsequent P frames.')
     full_audio=base.get('source_audio',base.get('audio')) if base is not None else prepare_audio(source,metadata,source_frames,directory,FPS)
     audio=trim_audio(full_audio,start_frame,end_frame,directory/'trimmed-audio.wav',FPS) if start_frame or end_frame!=source_frames else full_audio
+    audio=speed_audio(audio,frames,directory/f'sped-audio-{speed:g}.wav',speed,FPS)
     preview=directory/'preview.mp4'
     run('ffmpeg','-v','error','-y','-r',FPS,'-i',normalized,*encoding_args(audio),
         '-c:v','libx264','-threads','2','-crf','18','-pix_fmt','yuv420p','-movflags','+faststart',preview)
     run('ffmpeg','-v','error','-y','-i',preview,'-frames:v','1',directory/'thumb.jpg')
-    return {'look':look,'source_frames':source_frames,'start_frame':start_frame,'end_frame':end_frame,
+    return {'look':look,'speed':speed,'source_frames':source_frames,'start_frame':start_frame,'end_frame':end_frame,
         'source':str(source),'normalized':str(normalized),'lossless':str(lossless),'preview':str(preview),
         'audio':audio,'source_audio':full_audio,'frames':len(packets),'duration':len(packets)/FPS,'sha256':digest(Path(source))}
 

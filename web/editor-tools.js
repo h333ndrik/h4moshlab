@@ -9,11 +9,12 @@
   }
   function validateProject(p){
     if(!p || p.format!=='h4-mosh-project' || p.version!==1 || !Array.isArray(p.clips) || p.clips.length<1 || p.clips.length>12 || !Array.isArray(p.transitions) || p.transitions.length!==p.clips.length-1 || typeof p.sound!=='boolean')throw Error('Not a supported H4 Mosh project.');
-    for(const c of p.clips)if(!c || typeof c.name!=='string' || c.name.length>180 || !/^[a-f0-9]{64}$/.test(c.sha256) || !Number.isInteger(c.frames) || c.frames<2 || c.frames>2880 || (c.look!=null&&!['original','black-white','negative-bw','negative-color'].includes(c.look)))throw Error('Invalid project video reference.');
+    for(const c of p.clips)if(!c || typeof c.name!=='string' || c.name.length>180 || !/^[a-f0-9]{64}$/.test(c.sha256) || !Number.isInteger(c.frames) || c.frames<2 || c.frames>2880 || (c.look!=null&&!['original','black-white','negative-bw','negative-color'].includes(c.look)) || (c.speed!=null&&(typeof c.speed!=='number'||!Number.isFinite(c.speed)||c.speed<.1||c.speed>4||Math.abs(c.speed*10-Math.round(c.speed*10))>1e-9)))throw Error('Invalid project video reference.');
     for(const c of p.clips){
       for(const key of ['source_frames','start_frame','end_frame'])if(key in c&&!Number.isInteger(c[key]))throw Error('Invalid project trim.');
       const full=c.source_frames??c.frames,start=c.start_frame??0,end=c.end_frame??full;
-      if(!Number.isInteger(full)||full<2||full>2880||!Number.isInteger(start)||!Number.isInteger(end)||start<0||end>full||end-start<2||c.frames!==end-start)throw Error('Invalid project trim.');
+      const speed=c.speed??1,expected=Math.floor((end-start)/speed+.5);
+      if(!Number.isInteger(full)||full<2||full>2880||!Number.isInteger(start)||!Number.isInteger(end)||start<0||end>full||end-start<2||!Number.isInteger(expected)||expected<2||expected>2880||c.frames!==expected)throw Error('Invalid project trim or speed.');
     }
     if(p.order!=null){
       if(!Array.isArray(p.order)||p.order.length!==p.clips.length||p.order.some(id=>typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id)))throw Error('Invalid project clip order.');
@@ -33,7 +34,7 @@
       if(t.tempo!=null && (!t.tempo || !['motion-loop','motion-stutter','reset-pulse'].includes(t.effect) || typeof t.tempo.bpm!=='number' || !Number.isFinite(t.tempo.bpm) || t.tempo.bpm<40 || t.tempo.bpm>240 || ![.25,.5,1,2,4].includes(t.tempo.beats)))throw Error('Invalid project tempo.');
     }
     const keys=['effect','duration','motion_start','repeat','loop_frames','release_duration','ending','smooth','tempo','preset'];
-    return {format:p.format,version:1,sound:p.sound,...(p.order?{order:copy(p.order)}:{}),clips:p.clips.map(c=>({name:c.name,sha256:c.sha256,frames:c.frames,source_frames:c.source_frames??c.frames,start_frame:c.start_frame??0,end_frame:c.end_frame??c.source_frames??c.frames,look:c.look||'original',...(c.source_ref!=null?{source_ref:c.source_ref}:{})})),transitions:p.transitions.map(t=>Object.fromEntries(keys.filter(k=>t[k]!=null).map(k=>[k,copy(t[k])])))};
+    return {format:p.format,version:1,sound:p.sound,...(p.order?{order:copy(p.order)}:{}),clips:p.clips.map(c=>({name:c.name,sha256:c.sha256,frames:c.frames,source_frames:c.source_frames??c.frames,start_frame:c.start_frame??0,end_frame:c.end_frame??c.source_frames??c.frames,speed:c.speed??1,look:c.look||'original',...(c.source_ref!=null?{source_ref:c.source_ref}:{})})),transitions:p.transitions.map(t=>Object.fromEntries(keys.filter(k=>t[k]!=null).map(k=>[k,copy(t[k])])))};
   }
   function matchProject(project,library){
     const used=new Set(),references=new Map();return project.clips.map((source,index)=>{

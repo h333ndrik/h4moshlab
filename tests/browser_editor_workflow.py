@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,16 +38,31 @@ with sync_playwright() as p:
     expect(page.locator('#repeat-value')).to_have_text('8×');page.keyboard.press('Escape');page.locator('#undo').click()
     page.locator('.connector').click();expect(page.locator('#repeat-value')).to_have_text('4×');page.keyboard.press('Escape')
     page.locator('#sound').uncheck();page.locator('#undo').click();expect(page.locator('#sound')).to_be_checked()
-    page.locator('.clip-controls').last.locator('button').last.click();expect(page.locator('#count')).to_have_text('1 clip')
+    page.locator('.clip').last.get_by_role('button',name=re.compile('^Remove ')).click();expect(page.locator('#count')).to_have_text('1 clip')
     page.locator('#undo').click();expect(page.locator('#count')).to_have_text('2 clips')
     page.locator('.clip-look').first.select_option('negative-color');expect(page.locator('#status')).to_contain_text('Clip look ready',timeout=120000)
     page.locator('#undo').click();expect(page.locator('.clip-look').first).to_have_value('original')
     page.locator('#redo').click();expect(page.locator('.clip-look').first).to_have_value('negative-color')
+    original_frames=page.evaluate('state.clips[0].frames')
+    page.locator('.clip').first.get_by_role('button',name=re.compile('^Speed ')).click()
+    expect(page.locator('#speed-dialog')).to_be_visible();page.locator('#speed-range').fill('20')
+    expect(page.locator('#speed-value')).to_have_text('2.0×');page.locator('#speed-apply').click()
+    expect(page.locator('#speed-dialog')).not_to_be_visible(timeout=120000)
+    fast_frames=original_frames//2
+    assert page.evaluate('state.clips[0].speed')==2;assert page.evaluate('state.clips[0].frames')==fast_frames
+    page.locator('#undo').click();expect(page.locator('#status')).to_have_text('Undone.')
+    page.wait_for_function('(frames)=>state.clips[0].speed===1&&state.clips[0].frames===frames',arg=original_frames,timeout=120000)
+    page.locator('#redo').click();expect(page.locator('#status')).to_have_text('Redone.')
+    page.wait_for_function('(frames)=>state.clips[0].speed===2&&state.clips[0].frames===frames',arg=fast_frames,timeout=120000)
+    page.locator('.clip-look').first.select_option('black-white');expect(page.locator('#status')).to_contain_text('Clip look ready',timeout=120000)
+    assert page.evaluate('state.clips[0].speed')==2;assert page.evaluate('state.clips[0].frames')==fast_frames
+    page.locator('.clip-look').first.select_option('negative-color');expect(page.locator('#status')).to_contain_text('Clip look ready',timeout=120000)
+    assert page.evaluate('state.clips[0].speed')==2;assert page.evaluate('state.clips[0].frames')==fast_frames
     # Project is a lightweight settings file, with hashes and clip looks.
     page.locator('#project-menu summary').click()
     with page.expect_download() as download:page.locator('#save-project').click()
     project=artifacts/'saved.h4mosh';download.value.save_as(project);saved=json.loads(project.read_text())
-    assert saved['clips'][0]['look']=='negative-color';assert saved['transitions'][0]['tempo']['bpm']==137
+    assert saved['clips'][0]['look']=='negative-color';assert saved['clips'][0]['speed']==2;assert saved['clips'][0]['frames']==fast_frames;assert saved['transitions'][0]['tempo']['bpm']==137
     assert saved['transitions'][0]['loop_frames']==11
     assert len(project.read_bytes())<16384
     page.locator('#assemble').click();expect(page.locator('#status')).to_contain_text('verified full decode',timeout=120000)
@@ -67,7 +83,7 @@ with sync_playwright() as p:
             target=Path(directory)/f'renamed-{i}.mp4';shutil.copyfile(file,target);originals.append(str(target))
         other.locator('#relink-files').set_input_files(originals)
         expect(other.locator('#project-dialog')).not_to_be_visible(timeout=120000)
-    expect(other.locator('#count')).to_have_text('2 clips');expect(other.locator('.clip-look').first).to_have_value('negative-color')
+    expect(other.locator('#count')).to_have_text('2 clips');expect(other.locator('.clip-look').first).to_have_value('negative-color');assert other.evaluate('state.clips[0].speed')==2;assert other.evaluate('state.clips[0].frames')==fast_frames
     other.locator('.connector').click();expect(other.locator('#tempo-note')).to_contain_text('137 BPM');expect(other.locator('#repeat-value')).to_have_text('4×')
     other.keyboard.press('Escape');other.locator('#undo').click();expect(other.locator('#count')).to_have_text('0 clips')
     other.locator('#redo').click();expect(other.locator('#count')).to_have_text('2 clips')
@@ -77,4 +93,4 @@ with sync_playwright() as p:
     page.screenshot(path=str(artifacts/'desktop.png'),full_page=True)
     assert not errors,errors
     browser.close()
-print('PASS: imports/removals/reorder/slider/sound/look undo-redo, presets, BPM, real export, project hash relink after restart and narrow layout')
+print('PASS: imports/removals/reorder/slider/sound/look/speed undo-redo, presets, BPM, real export, project hash relink after restart and narrow layout')

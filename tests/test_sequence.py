@@ -242,10 +242,62 @@ assert.throws(()=>validateProject({...project,order:['c'.repeat(32)]}));
         app.busy.acquire()
         try:
             self.assertEqual(post('/api/clips/'+identifier+'/trim',{'start_frame':0,'end_frame':1}),400)
+            self.assertEqual(post('/api/clips/'+identifier+'/speed',{'start_frame':0,'end_frame':12,'speed':1.05}),400)
             self.assertEqual(post('/api/jobs',{'clips':[identifier],'trims':[{'start_frame':0,'end_frame':1}],'transitions':[]}),400)
-            self.assertEqual(post('/api/jobs',{'clips':[identifier],'trims':[{'start_frame':0,'end_frame':12}],'transitions':[]}),409)
+            self.assertEqual(post('/api/jobs',{'clips':[identifier],'trims':[{'start_frame':0,'end_frame':12}],'speeds':[2],'transitions':[]}),409)
         finally:
             app.busy.release();server.shutdown();server.server_close();thread.join();app.pool.shutdown(wait=True)
+
+    def test_speed_scales_frames_after_trim_and_keeps_ip_invariant(self):
+        original=self.clips[1]
+        for name,speed,start,end,count in (('fast',2,0,48,24),('slow',.5,0,48,96),('trim-fast',2,12,36,12)):
+            clip=prepare(original['source'],self.root/name,speed=speed,start_frame=start,end_frame=end,base=original)
+            self.assertEqual((clip['frames'],clip['source_frames'],clip['start_frame'],clip['end_frame'],clip['speed']),(count,48,start,end,speed))
+            _,packets=vops(Path(clip['normalized']))
+            self.assertEqual([p[4]>>6 for p in packets],[0]+[1]*(count-1))
+            result=render([clip],[],self.root/f'{name}-export')
+            self.assertEqual(result['frames'],count);self.assertEqual(result['full_decode'],'passed')
+            self.assertEqual(digest(Path(original['source'])),original['sha256'])
+        for speed in (0,.05,.15,1.25,4.1,True,'2',float('nan')):
+            with self.assertRaises(ValueError):prepare(original['source'],self.root/'invalid-speed',speed=speed,base=original)
+        short=prepare(original['source'],self.root/'short-speed',start_frame=0,end_frame=2,base=original)
+        with self.assertRaises(ValueError):prepare(original['source'],self.root/'too-fast',speed=2,start_frame=0,end_frame=2,base=original)
+        self.assertEqual(short['frames'],2)
+
+    def test_speed_http_restore_jobs_and_validation(self):
+        app=App(self.root/'speed-api');app.root.mkdir();identifier='d'*32
+        app.clips[identifier]={**self.clips[1],'id':identifier,'name':'speed.mp4'}
+        app.views[(identifier,'original')]=dict(app.clips[identifier])
+        server=ThreadingHTTPServer(('127.0.0.1',0),handler_for(app));thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def request(path,body=None):
+            connection=HTTPConnection('127.0.0.1',server.server_port)
+            connection.request('POST' if body is not None else 'GET',path,json.dumps(body) if body is not None else None,{'Content-Type':'application/json'})
+            response=connection.getresponse();status=response.status;data=json.loads(response.read());connection.close();return status,data
+        try:
+            endpoint='/api/clips/'+identifier+'/speed'
+            for speed in (0,.05,.15,1.05,4.1,True,'2'):
+                self.assertEqual(request(endpoint,{'speed':speed,'start_frame':0,'end_frame':24})[0],400)
+            code,fast=request(endpoint,{'speed':2,'start_frame':0,'end_frame':24})
+            self.assertEqual(code,200);self.assertEqual((fast['frames'],fast['speed']),(12,2))
+            self.assertIn('speed=2',fast['preview'])
+            code,slow=request(endpoint,{'speed':.5,'start_frame':0,'end_frame':24})
+            self.assertEqual(code,200);self.assertEqual((slow['frames'],slow['speed']),(48,.5))
+            code,look=request('/api/clips/'+identifier+'/look',{'look':'negative-bw','speed':2,'start_frame':0,'end_frame':24})
+            self.assertEqual(code,200);self.assertEqual((look['frames'],look['speed'],look['look']),(12,2,'negative-bw'))
+            trims=[{'start_frame':0,'end_frame':24}]*2
+            code,restored=request('/api/sequence/restore',{'clips':[identifier]*2,'looks':['original']*2,'trims':trims,'speeds':[2,.5]})
+            self.assertEqual(code,200);self.assertEqual([c['frames'] for c in restored['clips']],[12,48]);self.assertEqual([c['speed'] for c in restored['clips']],[2,.5])
+            code,job=request('/api/jobs',{'clips':[identifier]*2,'trims':trims,'speeds':[2,.5],'transitions':[{'effect':'cut'}]})
+            self.assertEqual(code,202);deadline=time.monotonic()+120
+            while time.monotonic()<deadline:
+                _,result=request('/api/jobs/'+job['id'])
+                if result['status']!='processing':break
+                time.sleep(.02)
+            self.assertEqual(result['status'],'ready',result)
+            self.assertEqual(result['result']['frames'],60);self.assertEqual(result['result']['full_decode'],'passed')
+            self.assertEqual(digest(Path(self.clips[1]['source'])),self.clips[1]['sha256'])
+        finally:
+            server.shutdown();server.server_close();thread.join();app.pool.shutdown(wait=True)
 
     def test_project_trim_round_trip_and_legacy_default(self):
         subprocess.run(['node','-e',"""
@@ -255,6 +307,11 @@ const p={format:'h4-mosh-project',version:1,sound:true,clips:[clip],transitions:
 const saved=validateProject(JSON.parse(JSON.stringify(p)));assert.equal(saved.clips[0].start_frame,12);assert.equal(saved.clips[0].end_frame,36);
 const legacy=validateProject({...p,clips:[{name:clip.name,sha256:clip.sha256,frames:48}]});assert.equal(legacy.clips[0].start_frame,0);assert.equal(legacy.clips[0].end_frame,48);
 for(const fields of [{start_frame:-1},{end_frame:60},{start_frame:true},{frames:1},{end_frame:35}])assert.throws(()=>validateProject({...p,clips:[{...clip,...fields}]}));
+const fast={...clip,frames:12,speed:2};
+const savedFast=validateProject({...p,clips:[fast]});assert.equal(savedFast.clips[0].speed,2);assert.equal(savedFast.clips[0].frames,12);
+const legacySpeed=validateProject({...p,clips:[{...clip,speed:null}]});assert.equal(legacySpeed.clips[0].speed,1);
+for(const speed of [0,.05,.15,1.05,4.1,true,'2'])assert.throws(()=>validateProject({...p,clips:[{...clip,frames:12,speed}]}));
+assert.throws(()=>validateProject({...p,clips:[{...clip,frames:24,speed:2}]}));
 """],cwd=Path(__file__).resolve().parents[1],check=True)
 
 if __name__ == '__main__':

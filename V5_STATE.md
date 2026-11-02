@@ -1,10 +1,89 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 21:24 CET
-Abgeschlossen: Block 4b (commit 859a881ddfb6994c37f7406e85ca63afad4b8cc7); Block 4 complete; Tests: 51 OK.
-In Arbeit: Keine Implementierungsänderungen; keine offenen Block-4-Assertions.
-Als nächstes: Block 5 (Speed Control: trim first, then speed; Tonhöhe erhalten), noch nicht begonnen.
-Letzte Testausgabe (Kurzfassung): Ran 51 tests in 178.666s — OK; vollständiger Browser-Smoke und Vier-Clip-Duplikat-/Audio-Regression PASS.
+Letzter Stand: 2026-11-02 23:40 CET
+Abgeschlossen: Block 5 (Speed Control); Blocks 1–5 complete; Tests: 54 OK.
+In Arbeit: Keine Implementierungsänderungen.
+Als nächstes: Block 6 (Randomize Mosh mit Seed), noch nicht begonnen.
+Letzte Testausgabe (Kurzfassung): Ran 54 tests in 75.632s — OK; Chromium-Smoke und Speed/Look/Projekt-Workflow PASS.
+
+## Block 5 done — per-clip speed control
+
+Block-5 feature, tests, UI and this state update are one commit on `v5-plan`.
+Speed is a non-destructive per-entry property from 0.1x to 4.0x in 0.1
+steps, default 1.0x, with a Reset-to-1.0x option.
+
+### Implementation
+
+- Trim remains the first source-grid operation. Only the trimmed lossless
+  stream is retimed with `setpts=(PTS-STARTPTS)/speed,fps=24`; look encoding
+  happens afterwards with the existing complete MPEG-4 normalization
+  (`q4`, `g10000`, `bf0`, `sc_threshold0`, initial I, subsequent P frames).
+- Output frames are `floor(trimmed_frames/speed + 0.5)` and must remain
+  between 2 and 2880 frames (the existing 120-second limit). The output
+  duration is always `frames/24`.
+- Audio is first block-trimmed, then retimed with a pitch-preserving
+  `atempo` chain whose factors are all 0.5–2.0. `apad` + exact
+  `atrim=end_sample=frames*2000` restores the mandatory sample budget.
+  The hard `assemble_audio`/`render` invariant is unchanged.
+- `prepare()` accepts speed; `App.view_clip()` keys caches by source, look,
+  trim range and speed. Duplicate timeline entries can use different speeds.
+- `/api/clips/<id>/speed` validates speed and range before the busy gate.
+  Jobs and restore accept parallel `speeds` arrays; project files persist
+  speed and revalidate `frames` against trim and speed.
+- The clip card shows non-default speed and opens a Speed dialog with a
+  0.1-step range, reset and Apply. Applying speed clamps both adjacent
+  transitions. Undo/Redo, look changes, trim changes, export and .h4mosh
+  preserve the per-entry speed.
+
+### Actual verification
+
+```text
+Starting baseline: Ran 51 tests in 71.987s — OK
+Final suite:       Ran 54 tests in 75.632s — OK
+```
+
+New tests cover:
+
+- 2.0x halves 48 -> 24 frames; 0.5x doubles 48 -> 96; trim 12–36 plus
+  2.0x yields exactly 12 frames. All outputs retain one I and all-P frames
+  and fully decode.
+- 440 Hz sinus audio stays at 440 Hz at 2.0x and 0.5x; 220/880 Hz bins stay
+  low; RMS stays within 15%; sample counts remain exactly frames*2000.
+- HTTP speed validation, independently speeded duplicate entries, restore,
+  cut render, look-after-speed propagation, original SHA256 preservation and
+  full decode.
+- Project schema accepts valid speed values and rejects out-of-step,
+  out-of-range, non-numeric and inconsistent frame counts.
+- Chromium workflow: speed 2.0x, Undo, Redo, look change while speeded,
+  project save, SHA256 relink on a cold server, real export/full decode,
+  390px layout and zero JavaScript errors.
+- Existing Chromium smoke still passes: duration 5.916667s,
+  `trim_preview_duration_reset_undo_redo_full_decode=passed`,
+  `ui_disable_sync_after_trim=passed`, `javascript_errors=[]`.
+
+The existing browser_editor_workflow remove step now targets the actual
+`Remove` button by accessible name; after Block 2 its old positional selector
+hit Duplicate. Undo/Redo assertions wait for `Undone.`/`Redone.` completion.
+The expected counts/frames and all product assertions remain unchanged.
+
+All exited 0:
+
+```sh
+PYTHONPYCACHEPREFIX=work/pycache python3 -m py_compile tools/*.py tests/*.py
+node --check web/app.js
+node --check web/editor-actions.js
+node --check web/editor-tools.js
+node tests/editor_tools_test.js
+git diff --check
+```
+
+### Preserved state
+
+Only the Block-5 implementation, tests and this state file changed.
+`origin/main` remains `c62b5c5ac2b4de8d7f779476f99ad5aae8464ffe`; Blueprint tag
+object remains `06d276234ee64dcfa537a44549aba44d23266488`. No merge, push,
+HTML-ID rename, resolution change, dependency, effect algorithm or scope
+change. Blocks 6–8 remain untouched.
 
 ## Block 4b done; block 4 complete
 

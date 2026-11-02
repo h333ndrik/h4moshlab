@@ -9,7 +9,7 @@ import unittest
 import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from mosh import probe, run
+from mosh import digest, probe, run
 from sequence import prepare, render
 
 RATE = 48000
@@ -117,6 +117,28 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(pcm(self.root/'trimmed-export/sequence.wav'),pcm(self.clips[0]['audio'])+expected[2000*4:])
         self.assertEqual(result['full_decode'],'passed')
         self.assertEqual(result['source_sha256'],[self.clips[0]['sha256'],original['sha256']])
+
+    def test_speed_preserves_pitch_frames_and_sample_budget(self):
+        original=self.clips[0]
+        fast=prepare(original['source'],self.root/'speed-fast',speed=2,base=original)
+        slow=prepare(original['source'],self.root/'speed-slow',speed=.5,base=original)
+        self.assertEqual((fast['frames'],slow['frames']),(18,72))
+        self.assertEqual((len(pcm(fast['audio'])),len(pcm(slow['audio']))),(18*2000*4,72*2000*4))
+        source_rms=rms(pcm(original['audio']),.1,.4)
+        self.assertAlmostEqual(rms(pcm(fast['audio']),.1,.4)/source_rms,1,delta=.15)
+        self.assertAlmostEqual(rms(pcm(slow['audio']),.5,1.5)/source_rms,1,delta=.15)
+        for clip,duration,offset in ((fast,.75,.1),(slow,3,1.0)):
+            result=render([clip],[],self.root/f"speed-{clip['speed']:g}-export")
+            self.assertEqual(result['frames'],clip['frames'])
+            self.assertEqual(result['audio_samples'],clip['frames']*2000)
+            self.assertEqual(result['full_decode'],'passed')
+            decoded=subprocess.check_output(['ffmpeg','-v','error','-xerror','-i',str(self.root/f"speed-{clip['speed']:g}-export/sequence.mp4"),
+                '-map','0:a:0','-ac','1','-ar','48000','-f','s16le','-'])
+            samples=array('h',decoded)
+            self.assertGreater(amplitude(samples,offset,440),10*amplitude(samples,offset,880))
+            self.assertGreater(amplitude(samples,offset,440),10*amplitude(samples,offset,220))
+            self.assertAlmostEqual(len(samples)/RATE,duration,delta=.002)
+        self.assertEqual(digest(Path(original['source'])),original['sha256'])
 
     def test_two_frame_trim_preserves_sample_invariant(self):
         original=self.clips[2]

@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const transitionCache = new Map();
-const state = {sound:true, clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, previewEnd: null, sequencePosition: 0};
+const state = {sound:true, clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, trimId: null, speedId: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
 const smoothEffects = ['frame-melt', 'progressive-melt', 'motion-stutter'];
 const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter', 'reset-pulse'];
@@ -10,6 +10,7 @@ const notes = {'reset-pulse': 'Real codec datamoshing: the first clear frame of 
 const abort = new AbortController();
 const clipSource = clip => clip.source_id || clip.id;
 const clipTrim = clip => ({start_frame:clip.start_frame??0,end_frame:clip.end_frame??clip.source_frames??clip.frames});
+const clipSpeed = clip => clip.speed??1;
 const newEntryId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
 let copiedSettings = null;
 let altDown = false;
@@ -57,7 +58,8 @@ function controls() {
   updateEffectAvailability();
   const previewProblem=state.dialogIndex!==null && state.clips[state.dialogIndex+1] ? pasteProblem(setting(state.dialogIndex),state.clips[state.dialogIndex+1].frames) : '';
   for(const id of ['preview-transition','compare-original','compare-gentler']){$(id).disabled=state.busy||Boolean(previewProblem);$(id).title=previewProblem;}
-  document.querySelectorAll('#trim-dialog button,#trim-dialog input').forEach(e=>e.disabled=state.busy);
+  document.querySelectorAll('#trim-dialog button,#trim-dialog input,#speed-dialog button,#speed-dialog input').forEach(e=>e.disabled=state.busy);
+  if(state.speedId)updateSpeed();
 }
 function busy(value) { state.busy = value; controls(); }
 function button(label, action, title) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.title = title || label; b.setAttribute('aria-label', title || label); b.onclick = action; return b; }
@@ -88,8 +90,8 @@ function draw() {
     const right = button('→', () => move(clip.id, index + 1), `Move ${clip.name} right`);
     left.dataset.boundary = String(index === 0); right.dataset.boundary = String(index === state.clips.length - 1);
     const duplicate = button('⧉', () => duplicateClip(clip.id), `Duplicate ${clip.name}`); duplicate.dataset.duplicate='true';
-    const duration = document.createElement('small'); duration.textContent = `${clip.duration.toFixed(2)}s`;
-    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);look.style.minWidth='0'; const appearance=document.createElement('div');appearance.className='clip-controls';appearance.append(look,button('Trim',()=>openTrim(clip.id),`Trim ${clip.name}`),duplicate);card.append(appearance);timeline.append(card);
+    const duration = document.createElement('small'); duration.textContent = clipSpeed(clip)===1 ? `${clip.duration.toFixed(2)}s` : `${clip.duration.toFixed(2)}s · ${clipSpeed(clip).toFixed(1)}×`;
+    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);look.style.minWidth='0'; const appearance=document.createElement('div');appearance.className='clip-controls';appearance.append(look,button('Trim',()=>openTrim(clip.id),`Trim ${clip.name}`),button('Speed',()=>openSpeed(clip.id),`Speed ${clip.name}`),duplicate);card.append(appearance);timeline.append(card);
   });
   document.querySelector('.sequence > .hint').textContent = touchUI() ? 'Swipe to browse clips. Use the arrows to reorder. Tap a connector to set a transition.' : 'Drag clips to reorder, or use the arrows. Select the connector between clips to set a transition.';
   controls();
@@ -311,7 +313,7 @@ async function assemble(download = false, transitionIndex = null) {
   try {
     if (!state.ready) {
       $('progress').hidden = false; $('progress').value = 0; status('Preparing sequence…');
-      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(clipSource), looks:state.clips.map(c=>c.look||'original'),trims:state.clips.map(clipTrim), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
+      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(clipSource), looks:state.clips.map(c=>c.look||'original'),trims:state.clips.map(clipTrim),speeds:state.clips.map(clipSpeed), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
       state.job = job.id;
       try { sessionStorage.setItem('h4-job', job.id); } catch {}
       state.ready = await waitForJob(job.id);
@@ -351,13 +353,13 @@ async function previewTransition(index, smoothOverride = null) {
   }
   const transitions = state.clips.slice(1).map((_,i)=>({...setting(i)}));
   if (smoothOverride !== null) transitions[index].smooth = smoothOverride;
-  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>[c.id,c.look||'original',clipTrim(c)]),transitions:transitions.slice(0,index+1),index});
+  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>[c.id,c.look||'original',clipTrim(c),clipSpeed(c)]),transitions:transitions.slice(0,index+1),index});
   error(); busy(true);
   try {
     let result = transitionCache.get(key);
     if (!result) {
       status('Preparing short transition preview…');
-      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(clipSource),looks:state.clips.map(c=>c.look||'original'),trims:state.clips.map(clipTrim),transitions,audio:state.sound,preview_boundary:index})});
+      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(clipSource),looks:state.clips.map(c=>c.look||'original'),trims:state.clips.map(clipTrim),speeds:state.clips.map(clipSpeed),transitions,audio:state.sound,preview_boundary:index})});
       result = await waitForJob(job.id);
       if (transitionCache.size >= 12) transitionCache.delete(transitionCache.keys().next().value);
       transitionCache.set(key,result);
@@ -449,7 +451,7 @@ async function prepareTrim(apply=false) {
   const markers={start_frame:Number($('trim-in').value),end_frame:Number($('trim-out').value)};
   busy(true);$('trim-error').textContent='';status('Preparing trim…');
   try{
-    const clip=await request(`/api/clips/${clipSource(entry)}/trim`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({look:entry.look||'original',...markers})});
+    const clip=await request(`/api/clips/${clipSource(entry)}/trim`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({look:entry.look||'original',speed:clipSpeed(entry),...markers})});
     if(apply){
       state.clips=state.clips.map(c=>c.id===id?{...clip,id,source_id:clipSource(entry)}:c);state.active=id;
       const index=state.clips.findIndex(c=>c.id===id);if(index)clampMotion(index-1);
@@ -472,6 +474,41 @@ $('trim-preview').addEventListener('volumechange',()=>{if(!state.sound&&!$('trim
 $('trim-dialog').addEventListener('close',clearTrimVideo);
 $('trim-dialog').addEventListener('cancel',event=>{if(state.busy)event.preventDefault();});
 window.addEventListener('beforeunload',clearTrimVideo);
+
+
+function updateSpeed() {
+  const clip=state.clips.find(c=>c.id===state.speedId);if(!clip)return;
+  const speed=Math.max(.1,Math.min(4,Number($('speed-range').value)/10));
+  const range=clipTrim(clip),frames=Math.floor((range.end_frame-range.start_frame)/speed+.5);
+  $('speed-value').value=`${speed.toFixed(1)}×`;
+  $('speed-note').textContent=`${frames} frames · ${(frames/24).toFixed(3)} s. Audio follows the new duration with preserved pitch; the original stays unchanged.`;
+  $('speed-apply').disabled=state.busy||frames<2||frames>2880;
+}
+function openSpeed(id) {
+  if(state.busy)return;finishEdit();state.speedId=id;
+  const clip=state.clips.find(c=>c.id===id);
+  $('speed-title').textContent=`Speed · ${clip.name}`;$('speed-error').textContent='';
+  $('speed-range').value=Math.round(clipSpeed(clip)*10);
+  $('speed-dialog').showModal();updateSpeed();
+}
+async function applySpeed() {
+  if(state.busy)return;const id=state.speedId,entry=state.clips.find(c=>c.id===id),before=editorSnapshot();
+  if(!entry)return;const speed=Math.max(.1,Math.min(4,Number($('speed-range').value)/10));
+  busy(true);$('speed-error').textContent='';status('Preparing clip speed…');
+  try{
+    const clip=await request(`/api/clips/${clipSource(entry)}/speed`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({look:entry.look||'original',speed,...clipTrim(entry)})});
+    const index=state.clips.findIndex(c=>c.id===id);
+    state.clips=state.clips.map(c=>c.id===id?{...clip,id,source_id:clipSource(entry)}:c);state.active=id;
+    if(index>0)clampMotion(index-1);if(index>=0&&index<state.clips.length-1)clampMotion(index);
+    invalidate();draw();editorHistory.record(before,editorSnapshot());$('speed-dialog').close();
+    status(`Speed ${speed.toFixed(1)}× applied. Originals and pitch stay unchanged.`);
+  }catch(e){$('speed-error').textContent=e.message;}
+  finally{busy(false);}
+}
+$('speed-range').oninput=updateSpeed;
+$('speed-reset').onclick=()=>{$('speed-range').value=10;updateSpeed();};
+$('speed-apply').onclick=applySpeed;
+$('speed-dialog').addEventListener('cancel',event=>{if(state.busy)event.preventDefault();});
 
 function pasteProblem(conf, frames) {
   if(!conf)return 'Copy transition settings first.';

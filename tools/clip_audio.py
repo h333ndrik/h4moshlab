@@ -80,6 +80,37 @@ def encoding_args(audio):
             '-c:a', 'aac', '-b:a', '192k', '-ar', str(SAMPLE_RATE), '-ac', str(CHANNELS)]
 
 
+def atempo_chain(speed):
+    """Return an atempo chain whose factors all lie in FFmpeg's 0.5–2.0 range."""
+    factors = []
+    remaining = float(speed)
+    while remaining < .5 - 1e-9:
+        factors.append(.5)
+        remaining /= .5
+    while remaining > 2 + 1e-9:
+        factors.append(2.0)
+        remaining /= 2
+    factors.append(round(remaining, 9))
+    return factors
+
+
+def speed_audio(audio, frames, destination, speed, fps):
+    """Retime PCM with pitch-preserving atempo and restore the exact frame budget."""
+    if not audio or speed == 1:
+        return audio
+    target = frames*SAMPLE_RATE//fps
+    filters = ','.join(f'atempo={factor:g}' for factor in atempo_chain(speed))
+    filters += f',apad,atrim=end_sample={target},asetpts=N/SR/TB'
+    run('ffmpeg','-v','error','-nostdin','-y','-i',str(audio),'-vn','-af',filters,
+        '-ac',CHANNELS,'-ar',SAMPLE_RATE,'-c:a','pcm_s16le',str(destination))
+    with wave.open(str(destination), 'rb') as output:
+        if (output.getnchannels(), output.getsampwidth(), output.getframerate()) != (CHANNELS, SAMPLE_WIDTH, SAMPLE_RATE):
+            raise RuntimeError('Unexpected sped audio format.')
+        if output.getnframes() != target:
+            raise RuntimeError('Sped audio length does not match the video.')
+    return str(destination)
+
+
 def trim_audio(audio, start_frame, end_frame, destination, fps):
     """Copy exact aligned PCM blocks; never re-decode or alter the original."""
     if not audio:
