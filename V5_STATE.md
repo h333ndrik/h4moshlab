@@ -1,12 +1,67 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 18:19 CET
-Abgeschlossen: Block 3 (commit cb893482d564c80b7d7fdc72eed78b73515f830d, Baseline: 41 OK)
-In Arbeit: Keine Implementierungsänderungen. Dritter Block-4-Kandidat nach erneut rotem Browser-Assert zurückgesetzt.
-Als nächstes: Block 4, UI-Zustand und natives disabled-Attribut unmittelbar vor dem Progressive-Melt-Assert isoliert untersuchen; nur nach erneuter Freigabe.
-Letzte Testausgabe (Kurzfassung): Ran 51 tests in 170.771s — OK; Browser Progressive-Melt-Option — FAILED.
+Letzter Stand: 2026-11-02 21:01 CET
+Abgeschlossen: Block 4a (commit 36fa044b06b41dbe4a536ae0610b5fe571b6a656, Tests: 51 OK)
+In Arbeit: Keine Implementierungsänderungen; Block 4b als nächster Micro-Block autorisiert.
+Als nächstes: Block 4b, Root-Cause-Analyse und zurückgestellte Disable-Sync-Assertion.
+Letzte Testausgabe (Kurzfassung): Ran 51 tests in 175.168s — OK; Browser 4a PASS, Disable-Sync explizit ausstehend.
 
-## Block 4 third attempt: HTTP fixed in candidate, UI still failed
+## Block 4a completed
+
+Feature commit: 36fa044b06b41dbe4a536ae0610b5fe571b6a656.
+Pending: UI disable-sync after trim, assertion specified in block 4b.
+
+The saved candidate was restored. Only the two positive Progressive Melt disabled
+assertions after short trim / redo were explicitly deferred by the user; every
+other duration, preview, reset, history, tooltip, audio, hash and decode assertion
+was retained. Full-length enabled status after Undo also remains tested.
+
+Completed: non-destructive per-entry frame markers; source/look/range caches;
+look-free trim/geometry pass followed by MPEG4 q4/g10000/bf0/sc_threshold0/m4v;
+strict one-I/remaining-P checks; sample-exact 2000-sample PCM frame blocks; hard
+render audio/video invariant; Trim dialog and real selection preview; reset;
+history; project download/reload and cold-server SHA256 relink of independently
+trimmed duplicate entries. Source files remain unchanged.
+
+Trim validation in Handler.do_POST follows authorization and precedes the busy
+gate: invalid parameters return 400, valid busy processing requests return 409.
+
+Actual results:
+
+```text
+Baseline: Ran 41 tests in 140.852s — OK
+Final:    Ran 51 tests in 175.168s — OK
+```
+
+python3 -m py_compile tools/*.py, node --check web/app.js, frontend syntax and
+Node editor-tools checks passed. Full Chromium smoke passed with no JS errors:
+trim_preview_duration_reset_undo_redo_full_decode=passed,
+ui_disable_sync_after_trim=pending_block_4b; complete ordinary export duration
+17.916667s. Trimmed render fully decoded and original hashes checked.
+
+Additional Chromium workflow passed: differently trimmed duplicate instances
+(36 and 24 frames) with independent looks, project download, session reload,
+cold-server relink from one original, and a 59-frame full-decode render. Desktop
+and 390px screenshots inspected. Ignored local evidence: work/v53-block4a-verified/.
+
+Pending 4b assertion (not active in 4a):
+
+```python
+assert page.locator('#effect option[value="progressive-melt"]').is_disabled()
+```
+
+Precondition: incoming clip trimmed below 13 frames; expected enabled again after
+Undo restores full length, disabled again after Redo. Block 4b must establish the
+root cause from response metadata, entry mapping and native DOM state before a
+fix; 4a does not claim this sync is solved.
+
+Code commit touched only the eleven restored Block-4 implementation/test files;
+this follow-up changes only V5_STATE.md. main, Blueprint, prediction algorithms,
+cursor/visit, output dimensions and single Export action are preserved. No new
+runtime dependency. PROJECT_PROGRESS.md/NEXT_SESSION.md updates remain Block 8.
+The pre-existing unrelated AGENTS.md naming note is untouched/uncommitted.
+
+## Historical Block 4 third attempt: HTTP fixed in candidate, UI still failed
 
 Baseline: Ran 41 tests in 147.246s — OK. The saved candidate was reapplied with
 only the requested HTTP/availability corrections and required codec configuration.
