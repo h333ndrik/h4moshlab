@@ -1,12 +1,89 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 21:09 CET
-Abgeschlossen: Block 4a (commit 36fa044b06b41dbe4a536ae0610b5fe571b6a656, Tests: 51 OK)
-In Arbeit: Keine Implementierungsänderungen. Block 4b nach roter zusätzlicher Duplikat-Regression zurückgesetzt.
-Als nächstes: Block 4b, gespeicherten Label-Fix und ursprüngliche Assertions wiederaufnehmen; Zusatztest muss vor der Frame-Prüfung auf abgeschlossenes Redo warten. Nur nach Freigabe.
-Letzte Testausgabe (Kurzfassung): Ran 51 tests in 175.372s — OK; ursprünglicher Browser-Smoke PASS; zusätzliche Duplikat-/Redo-Regression FAILED.
+Letzter Stand: 2026-11-02 21:24 CET
+Abgeschlossen: Block 4b (commit 859a881ddfb6994c37f7406e85ca63afad4b8cc7); Block 4 complete; Tests: 51 OK.
+In Arbeit: Keine Implementierungsänderungen; keine offenen Block-4-Assertions.
+Als nächstes: Block 5 (Speed Control: trim first, then speed; Tonhöhe erhalten), noch nicht begonnen.
+Letzte Testausgabe (Kurzfassung): Ran 51 tests in 178.666s — OK; vollständiger Browser-Smoke und Vier-Clip-Duplikat-/Audio-Regression PASS.
 
-## Block 4b diagnosis established; attempt stopped on extra regression
+## Block 4b done; block 4 complete
+
+Feature/test commit: 859a881ddfb6994c37f7406e85ca63afad4b8cc7.
+Block 4a remains 36fa044. No pending disable-sync assertion remains. Historical
+stopped/pending notes below describe earlier attempts and are superseded here.
+
+### Findings before fixes
+
+1. Native option state was already correct after trim (10 frames, disabled=true)
+   and Undo/Redo. Playwright's follow-label retargeting inspected the enabled
+   wrapping label.control SELECT instead of the OPTION. Explicit
+   <label for="effect">Method</label> retains label association/appearance and
+   makes the exact original is_disabled() assertions target the option.
+2. The added duplicate regression read frames immediately after Redo while
+   waiting only for Export.disabled. That condition is also true during busy
+   restoration. Awaiting Redone. and enabled history resolves the strict
+   [24,10] assertion without a product-history code change. No further failure
+   remained after the corrected wait, so no functional Undo/Redo fix was needed.
+
+### Final regression behavior
+
+- Original Progressive Melt disabled-after-short-trim assertion restored;
+  Undo/full-length active option and Redo/short disabled option all pass.
+- tests/browser_trim_sync.py uses auto-retrying status/count/enabled-control
+  assertions; no blind sleeps. Original frame expectations are unchanged.
+- Added literal duplicate → Undo → Redo check: 4 clips → 3 → 4. The restored
+  four-entry snapshot has identical IDs, order, trims, looks and boundary settings,
+  with four unique entry IDs and one shared source reference.
+- Editing the restored clone changes only its own look/trim; parent remains
+  B&W-negative while clone is Color-negative, and frame counts are [24,24,12,10].
+  Boundary configuration objects/durations remain independent.
+- Actual tone/video renders: initially 33 frames / 66000 PCM samples; after the
+  four-entry edit, 67 frames / 134000 PCM samples. Both MP4s fully decode, original
+  SHA256 is unchanged, source hashes match all repeated entries, no JS errors.
+  The hard assemble_audio/render sample invariant remains unchanged.
+
+### Exact verification
+
+```text
+Baseline: Ran 51 tests in 170.151s — OK
+Final:    Ran 51 tests in 178.666s — OK
+```
+
+All exited 0:
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 -m py_compile tools/*.py
+node --check web/app.js
+node tests/editor_tools_test.js
+H4_EDITOR_TEST_URL=http://127.0.0.1:8901 python3 tests/browser_smoke.py samples/clip-a.mp4 samples/clip-b.mp4 work/block2-clip-c.mp4
+H4_EDITOR_TEST_URL=http://127.0.0.1:8902 python3 tests/browser_trim_sync.py
+```
+
+Both browser checks used fresh server processes. The extra regression generates
+only a private synthetic two-second tone/video fixture under ignored work/.
+
+Browser smoke: duration 17.916667s, ui_disable_sync_after_trim=passed,
+trim_preview_duration_reset_undo_redo_full_decode=passed, javascript_errors=[].
+Duplicate regression: four_clips_after_redo=passed, frames=67,
+audio_samples=134000, full_decode=passed, source_unchanged=true,
+javascript_errors=[]. No test failed in this retry.
+
+### Scope / preserved state
+
+Code commit changes only web/index.html, tests/browser_smoke.py and the new
+optional tests/browser_trim_sync.py. No server, controller, history, codec,
+audio, CSS, cursor, resolution, HTML ID, export or dependency change.
+This separate follow-up updates only V5_STATE.md.
+
+Ignored evidence: work/v53-block4b-verified/ and work/trim-sync/ MP4s.
+main remains c62b5c5ac2b4de8d7f779476f99ad5aae8464ffe; Blueprint tag object remains
+06d276234ee64dcfa537a44549aba44d23266488. Branch v5-plan only; no merge performed.
+PROJECT_PROGRESS.md/NEXT_SESSION.md updates remain Block 8. The unrelated
+pre-existing AGENTS.md naming note is preserved, not included in these commits.
+Blocks 5–8 have not been started. Speed must preserve pitch, as already approved.
+
+## Historical Block 4b diagnosis established; attempt stopped on extra regression
 
 Block 4a was completed/published as 36fa044 + state f94f4ac before beginning 4b.
 The application is still at Block 4a: the 4b markup/test candidate was fully
