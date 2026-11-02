@@ -1,12 +1,83 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 17:46 CET
+Letzter Stand: 2026-11-02 18:19 CET
 Abgeschlossen: Block 3 (commit cb893482d564c80b7d7fdc72eed78b73515f830d, Baseline: 41 OK)
-In Arbeit: Keine Implementierungsänderungen. Zweiter Block-4-Kandidat nach HARD STOP vollständig zurückgesetzt.
-Als nächstes: Block 4, HTTP 409/400 und deaktivierte Effekt-Option untersuchen; keine Fortsetzung ohne erneute Freigabe.
-Letzte Testausgabe (Kurzfassung): Ran 50 tests in 175.435s — FAILED (failures=1); Browser-Guard ebenfalls FAILED.
+In Arbeit: Keine Implementierungsänderungen. Dritter Block-4-Kandidat nach erneut rotem Browser-Assert zurückgesetzt.
+Als nächstes: Block 4, UI-Zustand und natives disabled-Attribut unmittelbar vor dem Progressive-Melt-Assert isoliert untersuchen; nur nach erneuter Freigabe.
+Letzte Testausgabe (Kurzfassung): Ran 51 tests in 170.771s — OK; Browser Progressive-Melt-Option — FAILED.
 
-## Block 4 retry: diagnosis completed, implementation stopped
+## Block 4 third attempt: HTTP fixed in candidate, UI still failed
+
+Baseline: Ran 41 tests in 147.246s — OK. The saved candidate was reapplied with
+only the requested HTTP/availability corrections and required codec configuration.
+After the browser assertion failed, no further fixes or tests were started; the
+already-running full suite was allowed to finish. All eleven implementation/test
+files were then restored to HEAD. No Block-4 feature commit was made.
+
+### HTTP correction — verified in the discarded candidate
+
+Handler.do_POST() calls validate_trims_before_processing() after Host/Origin and
+LAN authorization, BEFORE app.busy.acquire(). This synchronous preflight parses
+bounded JSON once via read_json(), validates per-entry trim markers through
+timeline_trims(), and for POST /api/jobs validates transitions against the
+trimmed lengths via validate_project_settings(). ValueErrors return 400 before
+any processing/cache work. Valid requests still receive 409 if processing is busy.
+
+The original failing HTTP assertion was NOT changed and now passes. An additional
+regression holds the busy lock deliberately: invalid /trim and /api/jobs markers
+both return 400, while a valid /api/jobs request returns 409. All cases passed.
+This correction is saved in the patch but is NOT in the committed application.
+
+### Availability correction attempted, not verified
+
+The candidate centralizes option availability in updateEffectAvailability(),
+using the actual incoming state.clips entry frames (<13 for aligned effects),
+and invokes it from openTransition(), updateDialog() after clamping, and controls()
+after processing/undo updates. Per-entry metadata replacement remains separate
+from other instances of the same source. No existing assertion was relaxed.
+
+Despite those changes, the same original browser assertion still failed:
+
+```text
+File "tests/browser_smoke.py", line 152, in <module>
+  verify_trim(page)
+File "tests/browser_smoke.py", line 81, in verify_trim
+  assert page.locator('#effect option[value="progressive-melt"]').is_disabled()
+AssertionError
+```
+
+Do not infer a root cause from this alone. A future authorized attempt needs to
+capture the API response, state.clips incoming frame count, dialogIndex, selected
+option and actual disabled property/attribute immediately before the assertion.
+The newly appended Undo/Redo option assertions were not reached.
+
+### Exact verification / normalization
+
+```text
+Ran 51 tests in 170.771s
+OK
+```
+
+All original 41 tests, prior invalid-marker HTTP test, new busy-lock validation
+regression, 2/3-frame exports for all four looks, exact PCM/audio invariants,
+color-range selection, project metadata and source-hash checks passed.
+
+python3 -m py_compile tools/*.py, node --check web/app.js and
+node tests/editor_tools_test.js exited 0. Additional frontend syntax checks
+passed before execution. The full browser smoke FAILED; Block 4 is not complete.
+
+The candidate uses the required MPEG-4 normalization configuration for trim:
+g=10000, bf=0, sc_threshold=0, q=4, codec=mpeg4, format=m4v. The previous
+1000000000 threshold was removed. Trim and look remain separate passes, and the
+one-initial-I/subsequent-P validation plus render() audio sample check are intact.
+
+Recovery artifacts: work/v53-block4-third-stopped/implementation.patch,
+h4-block4-third-baseline.log, h4-block4-third-unit.log and h4-block4-third-smoke.log.
+They are ignored/local. The app remains at completed Block 3; source-code diff
+against HEAD is empty. main/Blueprint remain unchanged. The pre-existing AGENTS.md
+naming note is preserved separately, uncommitted.
+
+## Earlier Block 4 retry: diagnosis completed, implementation stopped
 
 The latest retry was explicitly authorized. It started on the unchanged Block-3
 application: Ran 41 tests in 149.868s — OK. After the new failures, all eleven
