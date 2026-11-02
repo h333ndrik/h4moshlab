@@ -1,5 +1,6 @@
 """Validated, meaningful preset/tempo settings shared with the simple editor."""
 import math
+import re
 from effects import EFFECTS, prediction_plan
 
 PRESETS = {
@@ -29,6 +30,14 @@ def preset_settings(effect,index,frame_count):
     return config
 
 
+def validate_random_seed(value):
+    if value is None:
+        return None
+    if not isinstance(value,str) or not re.fullmatch(r'[a-f0-9]{16}',value):
+        raise ValueError('Random seed must be 16 lowercase hexadecimal characters.')
+    return value
+
+
 def validate_project_settings(frames,transitions):
     if not isinstance(frames,list) or not 1<=len(frames)<=12 or not all(type(n) is int and 2<=n<=2880 for n in frames):
         raise ValueError('Invalid project source lengths.')
@@ -36,6 +45,7 @@ def validate_project_settings(frames,transitions):
         raise ValueError('One transition is needed per boundary.')
     for frame_count,config in zip(frames[1:],transitions):
         if not isinstance(config,dict):raise ValueError('Invalid project transition.')
+        validate_random_seed(config.get('random_seed'))
         effect=config.get('effect')
         if effect=='cut':continue
         if effect not in EFFECTS:raise ValueError('Unsupported project effect.')

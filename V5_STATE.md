@@ -1,10 +1,86 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 23:40 CET
-Abgeschlossen: Block 5 (Speed Control); Blocks 1–5 complete; Tests: 54 OK.
+Letzter Stand: 2026-11-03 00:02 CET
+Abgeschlossen: Block 6 (Randomize Mosh mit Seed); Blocks 1–6 complete; Tests: 56 OK.
 In Arbeit: Keine Implementierungsänderungen.
-Als nächstes: Block 6 (Randomize Mosh mit Seed), noch nicht begonnen.
-Letzte Testausgabe (Kurzfassung): Ran 54 tests in 75.632s — OK; Chromium-Smoke und Speed/Look/Projekt-Workflow PASS.
+Als nächstes: Block 7 (Audio follows loop), noch nicht begonnen.
+Letzte Testausgabe (Kurzfassung): Ran 56 tests in 75.977s — OK; Chromium-Smoke und Randomize/Projekt/Undo-Workflow PASS.
+
+## Block 6 done — seeded Randomize Mosh
+
+Block-6 implementation, tests, UI and this state update are one commit on
+`v5-plan`.
+
+### Implementation
+
+- `web/editor-tools.js` now contains a pure, Node-testable seeded randomizer.
+  A click creates 16 lowercase hex characters with
+  `crypto.getRandomValues`; the two 32-bit halves are XOR-folded into a
+  documented mulberry32 state. The same seed, clip frame count, duration,
+  motion start and release produce the same settings.
+- Only existing parameters are selected: `repeat` 2–12, `loop_frames` 2–48
+  (4–48 for Motion Stutter/Reset Pulse), `smooth` for Frame Melt,
+  Progressive Melt and Motion Stutter, and `ending` flow/reset. Duration and
+  effect are unchanged. Timeline-aligned effects and Gentler variants use
+  `motion_start=0`; motion start is only lowered when needed to fit a valid
+  donor window.
+- Every result is checked by a client guard equivalent to the relevant
+  `prediction_plan` conditions before it enters state. The target is always
+  the incoming timeline entry's current `frames`, therefore trims and speed
+  changes are included automatically.
+- The Randomize button sits beside the preset selector. It is disabled while
+  busy or when no valid draw exists, with the reason in its tooltip. A roll
+  deletes `preset`/`tempo`, selects Custom, records one Undo action and stores
+  `random_seed`. Manual changes clear the seed again.
+- `.h4mosh` validation accepts and preserves exactly 16 lowercase hex seed
+  characters; projects without a seed remain loadable as Custom.
+- `sequence.render()` validates `random_seed` and writes it into the boundary
+  report, so `verification.json` records it.
+
+### Actual verification
+
+```text
+Starting baseline: Ran 54 tests in 89.018s — OK
+Final suite:       Ran 56 tests in 75.977s — OK
+```
+
+New tests verify:
+
+- Same seed and same settings produce identical parameters; the randomizer
+  does not mutate its input; seed format is exact; Cut and invalid seeds are
+  rejected.
+- Property coverage: 50 seeds per effect at frame counts 37 and 96 (700
+  randomized variants total) all pass the client guard and Python
+  `prediction_plan`.
+- `random_seed` is present in both the returned boundary and the written
+  `verification.json`; malformed seeds are rejected before rendering.
+- Project schema accepts a valid seed and rejects malformed values; legacy
+  projects without a seed remain Custom.
+- Chromium: Randomize selects Custom, removes tempo, saves the seed into a
+  project, Undo restores the prior tempo/settings and the seed disappears.
+  The randomized project state and existing full sequence export pass.
+- Existing Chromium smoke still passes: duration 5.916667s,
+  `ui_disable_sync_after_trim=passed`, `javascript_errors=[]`.
+
+All exited 0:
+
+```sh
+PYTHONPYCACHEPREFIX=work/pycache python3 -m py_compile tools/*.py tests/*.py
+node --check web/app.js
+node --check web/editor-actions.js
+node --check web/editor-tools.js
+node tests/editor_tools_test.js
+git diff --check
+```
+
+Layout evidence: `work/block6/desktop.png` and `work/block6/mobile.png`.
+
+### Preserved state
+
+`origin/main` remains `c62b5c5ac2b4de8d7f779476f99ad5aae8464ffe`;
+Blueprint tag object remains `06d276234ee64dcfa537a44549aba44d23266488`.
+No merge, HTML-ID rename, resolution change, runtime dependency, new effect
+algorithm or scope change. Blocks 7–8 remain untouched.
 
 ## Block 5 done — per-clip speed control
 

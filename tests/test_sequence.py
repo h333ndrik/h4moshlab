@@ -55,6 +55,17 @@ class SequenceTests(unittest.TestCase):
         for clip in self.clips:
             self.assertEqual(digest(Path(clip['source'])), clip['sha256'])
 
+    def test_random_seed_is_reported_in_boundary_verification(self):
+        seed='0123456789abcdef'
+        result=render(self.clips[:2],[{'effect':'frame-melt','duration':.5,'repeat':3,'smooth':True,'ending':'reset','random_seed':seed}],self.root/'seeded')
+        self.assertEqual(result['boundaries'][0]['random_seed'],seed)
+        self.assertEqual(result['full_decode'],'passed')
+        report=json.loads((self.root/'seeded/verification.json').read_text())
+        self.assertEqual(report['boundaries'][0]['random_seed'],seed)
+        with self.assertRaises(ValueError):
+            render(self.clips[:2],[{'effect':'frame-melt','duration':.5,'random_seed':'ABC'}],self.root/'bad-seed')
+        self.assertFalse((self.root/'bad-seed').exists())
+
     def test_cut_reordering_and_single_clip(self):
         ordered = list(reversed(self.clips))
         result = render(ordered, [{'effect': 'cut'}, {'effect': 'cut'}], self.root/'cuts')

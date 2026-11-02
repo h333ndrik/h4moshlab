@@ -37,3 +37,5 @@ dialog .section-label{position:sticky;top:0;background:#f8f8f6;z-index:1}
 footer{position:relative}
 .visit{position:absolute;right:0;top:0;min-height:0;padding:0 4px;font-size:10px;line-height:1.4;letter-spacing:.12em;text-transform:lowercase;color:#b5b5b5;opacity:.35;border-color:transparent;transition:opacity 150ms ease-out,border-color 150ms ease-out}
 .visit:hover{opacity:1;border-color:#777}
+
+#preset-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}#preset-control label{margin-top:20px}#randomize-transition{margin-top:20px}#randomize-note{grid-column:1/-1;margin:0}

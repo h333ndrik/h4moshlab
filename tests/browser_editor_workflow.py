@@ -30,6 +30,19 @@ with sync_playwright() as p:
     expect(page.locator('#repeat-value')).to_have_text('4×')
     page.locator('#tempo-control summary').click();page.locator('#bpm').fill('137');page.locator('#apply-tempo').click()
     expect(page.locator('#tempo-note')).to_contain_text('137 BPM');expect(page.locator('#loop-value')).to_have_text('0.46 s')
+    before_randomize=page.evaluate('({...setting(0)})');assert not before_randomize.get('random_seed')
+    expect(page.locator('#randomize-transition')).to_be_enabled();page.locator('#randomize-transition').click()
+    expect(page.locator('#preset')).to_have_value('custom');expect(page.locator('#randomize-note')).to_contain_text('Seed ')
+    randomized=page.evaluate('({...setting(0)})')
+    assert re.fullmatch(r'[a-f0-9]{16}',randomized['random_seed']);assert 'preset' not in randomized;assert 'tempo' not in randomized
+    assert randomized['ending'] in ('flow','reset');assert 2<=randomized['repeat']<=12;assert 2<=randomized['loop_frames']<=48
+    page.keyboard.press('Escape');page.locator('#project-menu summary').click()
+    with page.expect_download() as download:page.locator('#save-project').click()
+    randomized_project=artifacts/'randomized.h4mosh';download.value.save_as(randomized_project);saved_random=json.loads(randomized_project.read_text())
+    assert saved_random['transitions'][0]['random_seed']==randomized['random_seed'];assert 'preset' not in saved_random['transitions'][0];assert 'tempo' not in saved_random['transitions'][0]
+    page.locator('#undo').click();expect(page.locator('#status')).to_have_text('Undone.')
+    page.wait_for_function('()=>!setting(0).random_seed&&setting(0).tempo?.bpm===137',timeout=120000)
+    page.locator('.connector').click();expect(page.locator('#preset')).to_have_value('custom');expect(page.locator('#tempo-note')).to_contain_text('137 BPM');page.keyboard.press('Escape')
     page.keyboard.press('Escape');page.locator('#undo').click();page.locator('.connector').click()
     expect(page.locator('#loop-value')).to_have_text('0.50 s');page.keyboard.press('Escape');page.locator('#redo').click()
     page.locator('.connector').click();expect(page.locator('#tempo-note')).to_contain_text('137 BPM')
@@ -93,4 +106,4 @@ with sync_playwright() as p:
     page.screenshot(path=str(artifacts/'desktop.png'),full_page=True)
     assert not errors,errors
     browser.close()
-print('PASS: imports/removals/reorder/slider/sound/look/speed undo-redo, presets, BPM, real export, project hash relink after restart and narrow layout')
+print('PASS: imports/removals/reorder/slider/sound/look/speed undo-redo, presets, seeded randomize, BPM, real export, project hash relink after restart and narrow layout')

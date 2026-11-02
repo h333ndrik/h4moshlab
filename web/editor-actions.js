@@ -91,7 +91,7 @@ async function applyTempo(){
   try{
     const tempo=await request('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'tempo',effect:conf.effect,bpm,beats})});
     if(tempo.loop_frames>=state.clips[index+1].frames-1)throw Error('This clip is too short for that interval. Choose fewer beats.');
-    finishEdit();beginEdit();delete conf.preset;conf.loop_frames=tempo.loop_frames;conf.duration=Math.max(conf.duration,(tempo.loop_frames+1)/24);conf.tempo={bpm,beats};clampMotion(index);invalidate();draw();updateDialog();finishEdit();
+    finishEdit();beginEdit();delete conf.preset;delete conf.random_seed;conf.loop_frames=tempo.loop_frames;conf.duration=Math.max(conf.duration,(tempo.loop_frames+1)/24);conf.tempo={bpm,beats};clampMotion(index);invalidate();draw();updateDialog();finishEdit();
   }catch(e){error(e.message);}finally{busy(false);}
 }
 window.addEventListener('DOMContentLoaded',()=>{

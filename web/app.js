@@ -56,6 +56,7 @@ function controls() {
   $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length || Boolean(problem);
   $('assemble').title=$('export').title=problem;
   updateEffectAvailability();
+  updateRandomizeControl();
   const previewProblem=state.dialogIndex!==null && state.clips[state.dialogIndex+1] ? pasteProblem(setting(state.dialogIndex),state.clips[state.dialogIndex+1].frames) : '';
   for(const id of ['preview-transition','compare-original','compare-gentler']){$(id).disabled=state.busy||Boolean(previewProblem);$(id).title=previewProblem;}
   document.querySelectorAll('#trim-dialog button,#trim-dialog input,#speed-dialog button,#speed-dialog input').forEach(e=>e.disabled=state.busy);
@@ -197,6 +198,13 @@ function updateEffectAvailability(index=state.dialogIndex) {
     option.title=disabled?'The incoming trim is too short for this effect.':'';
   }
 }
+function updateRandomizeControl() {
+  const button=$('randomize-transition');
+  if(state.dialogIndex===null||!state.clips[state.dialogIndex+1]){button.disabled=true;return;}
+  const conf=setting(state.dialogIndex),problem=state.busy?'Wait until processing finishes.':H4EditorTools.randomizeProblem(conf.effect,state.clips[state.dialogIndex+1].frames,conf);
+  button.disabled=Boolean(problem);button.title=problem||'Create a reproducible randomized variant from a new seed.';
+  $('randomize-note').textContent=conf.random_seed?`Seed ${conf.random_seed} · same seed and clip settings reproduce this variant.`:'Randomize changes only supported settings and stores a reproducible seed.';
+}
 function openTransition(index) {
   state.dialogIndex = index;
   $('transition-pair').textContent = `${state.clips[index].name} → ${state.clips[index + 1].name}`;
@@ -266,7 +274,7 @@ function updateDialog() {
   updateEffectAvailability(); motionFrame(); controls();
 }
 for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release']) $(id).addEventListener('input', () => {
-  beginEdit();const conf = setting(state.dialogIndex);delete conf.preset;
+  beginEdit();const conf = setting(state.dialogIndex);delete conf.preset;delete conf.random_seed;
   if(['effect','loop-length'].includes(id))delete conf.tempo;
   conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
   conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
@@ -276,6 +284,17 @@ for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'moti
   if (id === 'ending') conf.ending = $('ending').value;
   clampMotion(state.dialogIndex); invalidate(); draw(); updateDialog();
 });
+$('randomize-transition').onclick = () => {
+  if(state.busy)return;
+  const index=state.dialogIndex,conf=setting(index),frames=state.clips[index+1].frames;
+  const problem=H4EditorTools.randomizeProblem(conf.effect,frames,conf);
+  if(problem){error(problem);return;}
+  try{
+    const seed=H4EditorTools.createSeed(),randomized=H4EditorTools.randomizeTransition(conf.effect,frames,conf,seed);
+    finishEdit();beginEdit();state.settings.set(`${state.clips[index].id}|${state.clips[index+1].id}`,randomized);
+    invalidate();draw();updateDialog();finishEdit();status(`Randomized. Seed ${seed}. Same seed and clip settings reproduce this variant.`);
+  }catch(e){error(e.message);}
+};
 $('watch-motion').onclick = () => motionFrame(true);
 $('motion-preview').addEventListener('timeupdate', () => { if (state.motionEnd !== null && $('motion-preview').currentTime >= state.motionEnd) { $('motion-preview').pause(); state.motionEnd = null; } });
 $('transition-dialog').addEventListener('close', () => {
@@ -375,7 +394,7 @@ for (const [id,gentle] of [['compare-original',false],['compare-gentler',true]])
   const index=state.dialogIndex; $('transition-dialog').close(); previewTransition(index,gentle);
 };
 $('mark-motion-start').onclick=()=>{
-  finishEdit();beginEdit();const index=state.dialogIndex, conf=setting(index);delete conf.preset;
+  finishEdit();beginEdit();const index=state.dialogIndex, conf=setting(index);delete conf.preset;delete conf.random_seed;
   conf.motion_start=Math.max(0,Math.round($('motion-preview').currentTime*24)-1)/24;
   clampMotion(index); invalidate(); draw(); updateDialog();finishEdit();
 };
@@ -383,7 +402,7 @@ $('mark-motion-end').onclick=()=>{
   const index=state.dialogIndex, conf=setting(index);
   const frames=Math.round($('motion-preview').currentTime*24)-Math.round(conf.motion_start*24);
   if (frames<2 || frames>48) { error('Choose an end after the start, within 2 seconds.'); return; }
-  finishEdit();beginEdit();error();delete conf.tempo;delete conf.preset;conf.loop_frames=frames;
+  finishEdit();beginEdit();error();delete conf.tempo;delete conf.preset;delete conf.random_seed;conf.loop_frames=frames;
   conf.duration=Math.max(conf.duration,(frames+1)/24);
   clampMotion(index); invalidate(); draw(); updateDialog();finishEdit();
 };

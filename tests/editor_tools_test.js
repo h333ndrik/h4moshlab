@@ -1,7 +1,28 @@
 const assert=require('node:assert/strict');
-const {History,validateProject,matchProject}=require('../web/editor-tools.js');
+const {History,validateProject,matchProject,createSeed,randomizeTransition,randomizeProblem}=require('../web/editor-tools.js');
 const history=new History(2);history.record({n:0},{n:1});history.record({n:1},{n:2});history.record({n:2},{n:3});assert.equal(history.past.length,2);history.future.push({n:4});history.record({n:3},{n:3});assert.equal(history.future.length,1);history.record({n:3},{n:5});assert.equal(history.future.length,0);
 const hash='a'.repeat(64),project={format:'h4-mosh-project',version:1,sound:true,clips:[{name:'a.mov',frames:48,sha256:hash,look:'negative-bw'},{name:'a.mov',frames:48,sha256:hash}],transitions:[{effect:'reset-pulse',duration:1,loop_frames:12,tempo:{bpm:120,beats:1}}]};
 const validated=validateProject(project);assert.equal(validated.clips[0].look,'negative-bw');assert.equal(validated.clips[1].look,'original');assert.deepEqual(matchProject(validated,[{id:'one',sha256:hash},{id:'two',sha256:hash}]).map(c=>c.id),['one','two']);assert.equal(matchProject(validated,[{id:'one',sha256:hash}])[1],null);
 assert.throws(()=>validateProject({...project,version:2}));assert.throws(()=>validateProject({...project,clips:[{...project.clips[0],sha256:'bad'}]}));assert.throws(()=>validateProject({...project,transitions:[{effect:'fake',duration:1}]}));
-console.log('PASS: history bounds/deduplication, strict project schema, duplicate source matching');
+const seed=createSeed();assert.match(seed,/^[a-f0-9]{16}$/);
+const current={effect:'frame-melt',duration:1.5,motion_start:.25,repeat:4,loop_frames:12,smooth:false,ending:'flow',release_duration:.25,preset:1,tempo:{bpm:120,beats:1}};
+for(const effect of ['classic-mosh','reset-pulse','frame-melt','progressive-melt','motion-stutter','motion-loop','loop-release']){
+  const before=JSON.parse(JSON.stringify({...current,effect}));
+  const first=randomizeTransition(effect,96,before,'0123456789abcdef');
+  const second=randomizeTransition(effect,96,before,'0123456789abcdef');
+  assert.deepEqual(first,second);assert.deepEqual(before,{...current,effect});
+  assert.equal(first.random_seed,'0123456789abcdef');assert.equal(first.preset,undefined);assert.equal(first.tempo,undefined);
+  assert.ok(first.repeat>=2&&first.repeat<=12);assert.ok(first.loop_frames>=2&&first.loop_frames<=48);
+  assert.ok(['flow','reset'].includes(first.ending));
+  assert.equal(randomizeProblem(effect,96,{...current,effect}),'');
+}
+assert.notDeepEqual(randomizeTransition('motion-loop',96,{...current,effect:'motion-loop'},'0123456789abcdef'),randomizeTransition('motion-loop',96,{...current,effect:'motion-loop'},'fedcba9876543210'));
+assert.throws(()=>randomizeTransition('cut',96,current,seed));assert.throws(()=>randomizeTransition('frame-melt',96,current,'bad'));
+assert.ok(randomizeProblem('motion-loop',2,{duration:1/24,motion_start:0}));
+const randomized={...current,random_seed:'0123456789abcdef'};delete randomized.preset;delete randomized.tempo;
+const savedRandom=validateProject({...project,transitions:[randomized]});
+assert.equal(savedRandom.transitions[0].random_seed,'0123456789abcdef');
+assert.throws(()=>validateProject({...project,transitions:[{...randomized,random_seed:'ABC'}]}));
+const legacyRandom=validateProject({...project,transitions:[{effect:'reset-pulse',duration:1,loop_frames:12}]});
+assert.equal(legacyRandom.transitions[0].random_seed,undefined);assert.equal(legacyRandom.transitions[0].preset,undefined);
+console.log('PASS: history bounds/deduplication, strict project schema, duplicate source matching, seeded randomization and client guards');

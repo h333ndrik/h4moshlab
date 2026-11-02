@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
-from editor_options import validate_tempo
+from editor_options import validate_tempo, validate_random_seed
 
 from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
 from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args, trim_audio, speed_audio
@@ -128,6 +128,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
         effect = transition.get('effect')
         duration = transition.get('duration')
         repeat = transition.get('repeat', 4)
+        validate_random_seed(transition.get('random_seed'))
         if effect not in ('cut', *EFFECTS):
             raise ValueError('Unsupported effect.')
         if effect != 'cut':
@@ -160,7 +161,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
                                                  transition.get('release_duration') if transition['effect'] in SMOOTH_EFFECTS and transition.get('smooth') else None, transition.get('tempo'))
                 tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
-                                   'tempo': transition.get('tempo'),
+                                   'tempo': transition.get('tempo'), 'random_seed': transition.get('random_seed'),
                                    'motion_start': config['motion_start'], 'parameters': config, 'ending': ending,
                                    'reset_frame': expected+count if ending == 'reset' and count+1 < len(packets) else None,
                                    'release_b_vop_indices': list(range(count+1, len(packets))) if ending == 'flow' else [],
