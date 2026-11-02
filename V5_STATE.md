@@ -1,10 +1,94 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 21:01 CET
+Letzter Stand: 2026-11-02 21:09 CET
 Abgeschlossen: Block 4a (commit 36fa044b06b41dbe4a536ae0610b5fe571b6a656, Tests: 51 OK)
-In Arbeit: Keine Implementierungsänderungen; Block 4b als nächster Micro-Block autorisiert.
-Als nächstes: Block 4b, Root-Cause-Analyse und zurückgestellte Disable-Sync-Assertion.
-Letzte Testausgabe (Kurzfassung): Ran 51 tests in 175.168s — OK; Browser 4a PASS, Disable-Sync explizit ausstehend.
+In Arbeit: Keine Implementierungsänderungen. Block 4b nach roter zusätzlicher Duplikat-Regression zurückgesetzt.
+Als nächstes: Block 4b, gespeicherten Label-Fix und ursprüngliche Assertions wiederaufnehmen; Zusatztest muss vor der Frame-Prüfung auf abgeschlossenes Redo warten. Nur nach Freigabe.
+Letzte Testausgabe (Kurzfassung): Ran 51 tests in 175.372s — OK; ursprünglicher Browser-Smoke PASS; zusätzliche Duplikat-/Redo-Regression FAILED.
+
+## Block 4b diagnosis established; attempt stopped on extra regression
+
+Block 4a was completed/published as 36fa044 + state f94f4ac before beginning 4b.
+The application is still at Block 4a: the 4b markup/test candidate was fully
+rolled back after the additional browser regression failed. No 4b feature commit.
+Pending: UI disable-sync after trim, assertion specified in block 4b.
+
+### Root cause found BEFORE the fix
+
+Diagnostic response: frames=10, duration=10/24, source_frames=144 and
+preview/thumbnail URLs with start_frame=0&end_frame=10. state.clips contained
+the correct entry, with its own entry ID and source_id. The other clip remained
+144 frames. No source-length response, wrong-entry update or stale-disable bug
+was observed in this reproduction.
+
+Actual native option state / Playwright result:
+
+```text
+After trim: frames 10; option.disabled=true; disabled attribute=true;
+            matches(':disabled')=true; locator.is_disabled()=false
+After Undo: frames 144; native disabled=false; locator.is_disabled()=false
+After Redo: frames 10; native disabled=true; locator.is_disabled()=false
+```
+
+The installed Playwright implementation explains the discrepancy:
+elementState() retargets disabled/enabled queries with behavior='follow-label'.
+For the OPTION inside <label>Method<select id="effect">...</select></label>,
+retarget() follows the wrapping label.control to the enabled SELECT. Thus the
+original is_disabled() assertion was querying the select's state, not the option.
+
+The minimal candidate fix was explicit association:
+<label for="effect">Method</label><select id="effect">...</select>.
+No IDs, CSS, server, app controller, disable rules or rendering algorithms changed.
+This retains accessibility/appearance while removing the incorrect retarget.
+The exact original is_disabled() assertions were restored, NOT weakened.
+
+### Verified candidate results
+
+```text
+Ran 51 tests in 175.372s
+OK
+```
+
+Python compilation, node --check web/app.js and Node editor-tools tests passed.
+Full original browser_smoke.py passed: ui_disable_sync_after_trim=passed,
+trim previews/reset/Undo/Redo/export/decode passed, duration=17.916667 and
+javascript_errors=[]. The native short/Undo/Redo assertions all passed with the
+explicit label. This is a verified resolution of the ORIGINAL assertion only.
+
+### HARD STOP in the additional requested duplicate/audio regression
+
+A new optional browser_trim_sync.py creates a two-second tone/video fixture,
+duplicates it and independently trims the entries to 24 and 10 frames.
+Those initial entry-specific assertions, native disabled assertions and Undo
+restoring [24,48] passed. Immediately after Redo, the test failed:
+
+```text
+File "tests/browser_trim_sync.py", line 52
+  assert page.evaluate('state.clips.map(c=>c.frames)')==[24,10]
+AssertionError
+```
+
+The actual array at failure was not captured. The harness currently waits only
+for #assemble to be disabled before reading state after Redo. This is not a
+completion signal: processing also disables that button. The harness may read
+the pre-Redo snapshot while restoration is still pending. No product-data root
+cause for this additional failure is established; do not claim that it is one.
+The same expected [24,10] assertion must remain; an authorized retry should await
+status='Redone.' or state.busy=false before inspecting the restored snapshot.
+
+No fixes or expectation changes were attempted after this red result. The extra
+test's final audio/MP4/hash assertions were not reached. Existing 51-test audio,
+sample-count, duplicate trimming, source-hash and decode regressions stayed green.
+
+### Recovery / scope
+
+work/v53-block4b-stopped/ contains implementation.patch (two tracked files),
+browser_trim_sync.py (uncommitted new regression), native diagnosis JSON/script,
+Playwright retarget source excerpt and unit/smoke/failure logs. All ignored/local.
+The two tracked files were restored and the new test removed from the test tree.
+The app remains at 4a; no extra test falsely reported as passing. main, Blueprint
+and backend/app source remain untouched. Existing AGENTS.md naming note remains
+separate/uncommitted. Blocks 5–8 were not started.
 
 ## Block 4a completed
 
