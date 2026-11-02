@@ -7,32 +7,72 @@ import subprocess
 from editor_options import validate_tempo
 
 from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
-from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args
-from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
+from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args, trim_audio
+from mosh import WIDTH, HEIGHT, digest, probe, run, vops, LOOKS
 
 FPS = 24
 
 
-def prepare(source, directory, look='original'):
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    metadata = probe(source)
-    videos = [s for s in metadata['streams'] if s['codec_type'] == 'video']
-    duration = float(videos[0].get('duration', metadata['format'].get('duration', 0))) if videos else 0
-    if not videos or not math.isfinite(duration) or not 0 < duration <= 120:
+def trim_bounds(frames, start_frame=0, end_frame=None):
+    end_frame = frames if end_frame is None else end_frame
+    if type(start_frame) is not int or type(end_frame) is not int or not 0 <= start_frame < end_frame <= frames or end_frame-start_frame < 2:
+        raise ValueError('Trim needs integer frame markers within the source and at least 2 frames.')
+    return start_frame, end_frame
+
+
+def frame_count(source):
+    output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-i',str(source),'-map','0:v:0',
+        '-vf','setpts=PTS-STARTPTS,fps=24','-an','-fps_mode','passthrough','-progress','pipe:1','-nostats','-f','null','-'],text=True)
+    return int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
+
+
+def prepare(source, directory, look='original', start_frame=0, end_frame=None, base=None):
+    directory=Path(directory)
+    directory.mkdir(parents=True,exist_ok=True)
+    metadata=probe(source)
+    videos=[s for s in metadata['streams'] if s['codec_type']=='video']
+    duration=float(videos[0].get('duration',metadata['format'].get('duration',0))) if videos else 0
+    if not videos or not math.isfinite(duration) or not 0<duration<=120:
         raise ValueError('Use a video between 0 and 120 seconds.')
-    normalized = directory/'clip.m4v'
-    normalize(source, normalized, max_seconds=None, look=look)
-    header, packets = vops(normalized)
-    if len(packets) < 2 or [p[4] >> 6 for p in packets] != [0]+[1]*(len(packets)-1):
-        raise ValueError('Video must normalize to at least two I/P frames.')
-    audio = prepare_audio(source, metadata, len(packets), directory, FPS)
-    preview = directory/'preview.mp4'
-    run('ffmpeg', '-v', 'error', '-y', '-r', FPS, '-i', normalized, *encoding_args(audio),
-        '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', preview)
-    run('ffmpeg', '-v', 'error', '-y', '-i', preview, '-frames:v', '1', directory/'thumb.jpg')
-    return {'look':look, 'source': str(source), 'normalized': str(normalized), 'preview': str(preview), 'audio': audio,
-            'frames': len(packets), 'duration': len(packets)/FPS, 'sha256': digest(Path(source))}
+    if look not in LOOKS:raise ValueError('Unsupported clip look.')
+    source_frames=base.get('source_frames',base['frames']) if base is not None else None
+    if source_frames is None and (start_frame!=0 or end_frame is not None):source_frames=frame_count(source)
+    if source_frames is not None:start_frame,end_frame=trim_bounds(source_frames,start_frame,end_frame)
+    elif type(start_frame) is not int:raise ValueError('Trim markers must be integers.')
+    # Trim at 24fps without a look, then normalize geometry into a lossless cache.
+    # Look encoding is a separate pass; no trim filter ever shares its chain.
+    if base is not None and base.get('start_frame',0)==start_frame and base.get('end_frame',source_frames)==end_frame and base.get('lossless'):
+        lossless=Path(base['lossless'])
+    else:
+        lossless=directory/'normalized-trim.mkv'
+        trim=f'trim=start_frame={start_frame}'+(f':end_frame={end_frame}' if end_frame is not None else '')
+        filters=(f'setpts=PTS-STARTPTS,fps=24,{trim},setpts=PTS-STARTPTS,'
+                 f'scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,setsar=1')
+        output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-y','-i',str(source),'-map','0:v:0','-an',
+            '-vf',filters,'-c:v','ffv1','-threads','2','-fps_mode','passthrough','-progress','pipe:1','-nostats',str(lossless)],text=True)
+        count=int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
+        if source_frames is None:source_frames=count;end_frame=count
+        start_frame,end_frame=trim_bounds(source_frames,start_frame,end_frame)
+        if count!=end_frame-start_frame:raise ValueError('Trim did not retain the requested frame range.')
+    normalized=directory/'clip.m4v'
+    # Use the complete existing normalization configuration after the separate
+    # trim stage. Reject any stream that violates the strict one-I/all-P invariant.
+    run('ffmpeg','-v','error','-nostdin','-y','-i',lossless,'-an',
+        '-vf',f'{LOOKS[look]}pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
+        '-c:v','mpeg4','-threads','2','-q:v','4','-g','10000','-bf','0','-sc_threshold','0',
+        '-fps_mode','passthrough','-f','m4v',normalized)
+    _,packets=vops(normalized)
+    if len(packets)!=end_frame-start_frame or [p[4]>>6 for p in packets]!=[0]+[1]*(len(packets)-1):
+        raise ValueError('Trim normalization must retain at least two frames with one initial I and subsequent P frames.')
+    full_audio=base.get('source_audio',base.get('audio')) if base is not None else prepare_audio(source,metadata,source_frames,directory,FPS)
+    audio=trim_audio(full_audio,start_frame,end_frame,directory/'trimmed-audio.wav',FPS) if start_frame or end_frame!=source_frames else full_audio
+    preview=directory/'preview.mp4'
+    run('ffmpeg','-v','error','-y','-r',FPS,'-i',normalized,*encoding_args(audio),
+        '-c:v','libx264','-threads','2','-crf','18','-pix_fmt','yuv420p','-movflags','+faststart',preview)
+    run('ffmpeg','-v','error','-y','-i',preview,'-frames:v','1',directory/'thumb.jpg')
+    return {'look':look,'source_frames':source_frames,'start_frame':start_frame,'end_frame':end_frame,
+        'source':str(source),'normalized':str(normalized),'lossless':str(lossless),'preview':str(preview),
+        'audio':audio,'source_audio':full_audio,'frames':len(packets),'duration':len(packets)/FPS,'sha256':digest(Path(source))}
 
 
 def ending_mode(transition):

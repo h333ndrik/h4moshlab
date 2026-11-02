@@ -78,3 +78,26 @@ def encoding_args(audio):
         return ['-map', '0:v:0', '-an']
     return ['-i', str(audio), '-map', '0:v:0', '-map', '1:a:0',
             '-c:a', 'aac', '-b:a', '192k', '-ar', str(SAMPLE_RATE), '-ac', str(CHANNELS)]
+
+
+def trim_audio(audio, start_frame, end_frame, destination, fps):
+    """Copy exact aligned PCM blocks; never re-decode or alter the original."""
+    if not audio:
+        return None
+    samples_per_frame = SAMPLE_RATE // fps
+    with wave.open(str(audio), 'rb') as source:
+        if (source.getnchannels(), source.getsampwidth(), source.getframerate()) != (CHANNELS, SAMPLE_WIDTH, SAMPLE_RATE):
+            raise RuntimeError('Unexpected audio cache format; re-import the clip.')
+        if end_frame*samples_per_frame > source.getnframes():
+            raise RuntimeError('Incomplete audio cache; re-import the clip.')
+        source.setpos(start_frame*samples_per_frame)
+        with wave.open(str(destination), 'wb') as target:
+            target.setparams((CHANNELS, SAMPLE_WIDTH, SAMPLE_RATE, 0, 'NONE', 'not compressed'))
+            remaining = (end_frame-start_frame)*samples_per_frame
+            while remaining:
+                data = source.readframes(min(16384, remaining))
+                if not data:
+                    raise RuntimeError('Incomplete audio trim.')
+                target.writeframesraw(data)
+                remaining -= len(data)//(CHANNELS*SAMPLE_WIDTH)
+    return str(destination)

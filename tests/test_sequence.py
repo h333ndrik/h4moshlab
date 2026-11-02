@@ -165,5 +165,97 @@ assert.throws(()=>validateProject({...project,order:['c'.repeat(32)]}));
 """
         subprocess.run(['node','-e',script],cwd=Path(__file__).resolve().parents[1],check=True)
 
+    def test_frame_trim_selects_the_requested_images_and_keeps_original(self):
+        source=self.root/'color-sections.mp4'
+        run('ffmpeg','-v','error','-y','-f','lavfi','-i','color=red:size=160x120:rate=24:duration=0.5',
+            '-f','lavfi','-i','color=green:size=160x120:rate=24:duration=0.5',
+            '-f','lavfi','-i','color=blue:size=160x120:rate=24:duration=0.5',
+            '-filter_complex','[0:v][1:v][2:v]concat=n=3:v=1:a=0','-c:v','libx264','-threads','2',source)
+        original=digest(source)
+        clip=prepare(source,self.root/'green-trim',start_frame=12,end_frame=24)
+        self.assertEqual((clip['source_frames'],clip['frames'],clip['start_frame'],clip['end_frame']), (36,12,12,24))
+        pixels=subprocess.check_output(['ffmpeg','-v','error','-i',clip['preview'],'-frames:v','1','-vf','scale=1:1','-pix_fmt','rgb24','-f','rawvideo','-'])
+        self.assertLess(pixels[0],20);self.assertGreater(pixels[1],100);self.assertLess(pixels[2],20)
+        result=render([clip],[],self.root/'green-export')
+        self.assertEqual(result['frames'],12);self.assertEqual(result['full_decode'],'passed')
+        self.assertEqual(digest(source),original)
+        for start,end in ((-1,12),(0,37),(12,12),(13,12),(12,13),(True,24),(1.5,24),(0,24.0)):
+            with self.assertRaises(ValueError):prepare(source,self.root/'invalid-trim',start_frame=start,end_frame=end,base=clip)
+        too_short=prepare(self.clips[1]['source'],self.root/'too-short',start_frame=0,end_frame=6,base=self.clips[1])
+        with self.assertRaises(ValueError):render([self.clips[0],too_short],[{'effect':'progressive-melt','duration':5/24}],self.root/'invalid-short-transition')
+        self.assertFalse((self.root/'invalid-short-transition').exists())
+
+    def check_short_trim(self, look):
+        original=self.clips[1]
+        for count in (2,3):
+            with self.subTest(look=look,frames=count):
+                clip=prepare(original['source'],self.root/f'short-{look}-{count}',look=look,start_frame=13,end_frame=13+count,base=original)
+                self.assertEqual(clip['frames'],count)
+                self.assertEqual([p[4]>>6 for p in vops(Path(clip['normalized']))[1]],[0]+[1]*(count-1))
+                result=render([clip],[],self.root/f'short-export-{look}-{count}')
+                self.assertEqual(result['frames'],count);self.assertEqual(result['full_decode'],'passed')
+                self.assertEqual(digest(Path(original['source'])),original['sha256'])
+
+    def test_two_and_three_frame_trim_original(self):self.check_short_trim('original')
+    def test_two_and_three_frame_trim_black_white(self):self.check_short_trim('black-white')
+    def test_two_and_three_frame_trim_bw_negative(self):self.check_short_trim('negative-bw')
+    def test_two_and_three_frame_trim_color_negative(self):self.check_short_trim('negative-color')
+
+    def test_trim_variants_are_per_entry_and_http_rejects_invalid_markers(self):
+        app=App(self.root/'trim-api');app.root.mkdir();identifier='b'*32
+        app.clips[identifier]={**self.clips[1],'id':identifier,'name':'trim.mp4'}
+        app.views[(identifier,'original')]=dict(app.clips[identifier])
+        server=ThreadingHTTPServer(('127.0.0.1',0),handler_for(app));thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def request(path,body=None):
+            connection=HTTPConnection('127.0.0.1',server.server_port)
+            connection.request('POST' if body is not None else 'GET',path,json.dumps(body) if body is not None else None,{'Content-Type':'application/json'})
+            response=connection.getresponse();status=response.status;data=json.loads(response.read());connection.close();return status,data
+        try:
+            endpoint='/api/clips/'+identifier+'/trim'
+            for start,end in ((-1,24),(0,49),(0,1),(4,4),(True,24),(0,None),(0,4.5)):
+                self.assertEqual(request(endpoint,{'start_frame':start,'end_frame':end})[0],400)
+            trims=[{'start_frame':0,'end_frame':18},{'start_frame':12,'end_frame':36}]
+            code,restored=request('/api/sequence/restore',{'clips':[identifier]*2,'looks':['original']*2,'trims':trims})
+            self.assertEqual(code,200);self.assertEqual([c['frames'] for c in restored['clips']],[18,24])
+            self.assertNotEqual(restored['clips'][0]['preview'],restored['clips'][1]['preview'])
+            self.assertEqual(app.clips[identifier]['frames'],48)
+            code,job=request('/api/jobs',{'clips':[identifier]*2,'trims':trims,'transitions':[{'effect':'cut'}]})
+            self.assertEqual(code,202);deadline=time.monotonic()+90
+            while time.monotonic()<deadline:
+                _,result=request('/api/jobs/'+job['id'])
+                if result['status']!='processing':break
+                time.sleep(.02)
+            self.assertEqual(result['status'],'ready',result)
+            self.assertEqual(result['result']['frames'],42);self.assertEqual(result['result']['full_decode'],'passed')
+            self.assertEqual(digest(Path(self.clips[1]['source'])),self.clips[1]['sha256'])
+        finally:
+            server.shutdown();server.server_close();thread.join();app.pool.shutdown(wait=True)
+
+    def test_invalid_trim_is_400_even_when_processing_is_busy(self):
+        app=App(self.root/'busy-trim-api');app.root.mkdir();identifier='c'*32
+        app.clips[identifier]={**self.clips[1],'id':identifier,'name':'busy.mp4'}
+        server=ThreadingHTTPServer(('127.0.0.1',0),handler_for(app));thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def post(path,body):
+            connection=HTTPConnection('127.0.0.1',server.server_port)
+            connection.request('POST',path,json.dumps(body),{'Content-Type':'application/json'})
+            response=connection.getresponse();code=response.status;response.read();connection.close();return code
+        app.busy.acquire()
+        try:
+            self.assertEqual(post('/api/clips/'+identifier+'/trim',{'start_frame':0,'end_frame':1}),400)
+            self.assertEqual(post('/api/jobs',{'clips':[identifier],'trims':[{'start_frame':0,'end_frame':1}],'transitions':[]}),400)
+            self.assertEqual(post('/api/jobs',{'clips':[identifier],'trims':[{'start_frame':0,'end_frame':12}],'transitions':[]}),409)
+        finally:
+            app.busy.release();server.shutdown();server.server_close();thread.join();app.pool.shutdown(wait=True)
+
+    def test_project_trim_round_trip_and_legacy_default(self):
+        subprocess.run(['node','-e',"""
+const assert=require('node:assert/strict'),{validateProject}=require('./web/editor-tools.js');
+const clip={name:'a.mp4',sha256:'a'.repeat(64),frames:24,source_frames:48,start_frame:12,end_frame:36};
+const p={format:'h4-mosh-project',version:1,sound:true,clips:[clip],transitions:[]};
+const saved=validateProject(JSON.parse(JSON.stringify(p)));assert.equal(saved.clips[0].start_frame,12);assert.equal(saved.clips[0].end_frame,36);
+const legacy=validateProject({...p,clips:[{name:clip.name,sha256:clip.sha256,frames:48}]});assert.equal(legacy.clips[0].start_frame,0);assert.equal(legacy.clips[0].end_frame,48);
+for(const fields of [{start_frame:-1},{end_frame:60},{start_frame:true},{frames:1},{end_frame:35}])assert.throws(()=>validateProject({...p,clips:[{...clip,...fields}]}));
+"""],cwd=Path(__file__).resolve().parents[1],check=True)
+
 if __name__ == '__main__':
     unittest.main()

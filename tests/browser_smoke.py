@@ -38,6 +38,64 @@ def drop_video(page, target, path):
     finally:
         transfer.dispose()
 
+def verify_trim(page):
+    original=page.evaluate('state.clips.map(c=>c.frames)')
+    start=min(12,original[0]-2);end=min(original[0],start+36);count=end-start
+    def open_trim(index):
+        page.locator('.clip').nth(index).get_by_role('button',name=re.compile('^Trim ')).click()
+        expect(page.locator('#trim-dialog')).to_be_visible()
+    def apply():
+        page.locator('#trim-apply').click()
+        expect(page.locator('#trim-dialog')).not_to_be_visible(timeout=120000)
+    open_trim(0)
+    page.locator('#trim-in').fill(str(start));page.locator('#trim-out').fill(str(end))
+    expect(page.locator('#trim-selection')).to_contain_text(f'{count} frames')
+    page.locator('#trim-watch').click()
+    expect(page.locator('#trim-watch')).to_be_enabled(timeout=120000)
+    page.wait_for_function('(duration)=>{const v=document.querySelector("#trim-preview");return v.readyState>=2&&Math.abs(v.duration-duration)<.002}',arg=count/24)
+    apply();expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    assert page.evaluate('state.clips[0].frames')==count
+    page.wait_for_function('(duration)=>{const v=document.querySelector("#player");return v.readyState>=2&&Math.abs(v.duration-duration)<.002}',arg=count/24)
+    page.locator('#assemble').click()
+    expect(page.locator('#status')).to_contain_text('verified full decode',timeout=120000)
+    url=page.locator('#player').get_attribute('src')
+    report=page.request.get(base+'/api/jobs/'+url.rsplit('/',1)[1]).json()['result']
+    assert report['frames']==sum(original)-original[0]+count-2
+    assert report['full_decode']=='passed'
+    trimmed=artifacts/'trimmed-sequence.mp4';trimmed.write_bytes(page.request.get(base+url).body())
+    subprocess.run(['ffmpeg','-v','error','-xerror','-i',str(trimmed),'-f','null','-'],check=True)
+    page.locator('#undo').click();expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    assert page.evaluate('state.clips[0].frames')==original[0]
+    page.locator('#redo').click();expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    assert page.evaluate('state.clips[0].frames')==count
+    open_trim(0);page.locator('#trim-reset').click();apply()
+    expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    assert page.evaluate('state.clips[0].frames')==original[0]
+    # Preserve the selected effect, but block it if the incoming trim is too short.
+    page.locator('.connector').first.click();page.locator('#effect').select_option('progressive-melt')
+    page.get_by_role('button',name='Close settings').click()
+    open_trim(1);page.locator('#trim-out').fill('6');apply()
+    expect(page.locator('#assemble')).to_be_disabled()
+    assert '0.5s' in page.locator('#assemble').get_attribute('title')
+    page.locator('.connector').first.click()
+    # Pending: UI disable-sync after trim, assertion specified in block 4b.
+    assert 'too short' in page.locator('#effect option[value="progressive-melt"]').get_attribute('title')
+    expect(page.locator('#preview-transition')).to_be_disabled()
+    assert page.evaluate('state.clips[1].frames')==6
+    page.get_by_role('button',name='Close settings').click()
+    page.locator('#undo').click();expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    page.locator('.connector').first.click()
+    assert not page.locator('#effect option[value="progressive-melt"]').is_disabled()
+    page.get_by_role('button',name='Close settings').click()
+    page.locator('#redo').click();expect(page.locator('#assemble')).to_be_disabled(timeout=120000)
+    page.locator('.connector').first.click()
+    # Pending: UI disable-sync after trim, assertion specified in block 4b.
+    page.locator('#effect').select_option('classic-mosh')
+    page.get_by_role('button',name='Close settings').click()
+    open_trim(1);page.locator('#trim-reset').click();apply()
+    expect(page.locator('#assemble')).to_be_enabled(timeout=120000)
+    assert page.evaluate('state.clips.map(c=>c.frames)')==original
+
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=shutil.which('chromium'))
     page = browser.new_page(viewport={'width': 1200, 'height': 1000}, accept_downloads=True)
@@ -91,6 +149,7 @@ with sync_playwright() as p:
     page.wait_for_function('!document.querySelector("#player").seeking')
     expected = min(start+1, page.locator('#player').evaluate('v=>v.duration'))
     assert abs(page.locator('#player').evaluate('v=>v.currentTime') - expected) < .000002
+    verify_trim(page)
     original_order = page.locator('.clip-select span').all_text_contents()
     page.get_by_role('button', name=f'Move {Path(files[0]).name} right', exact=True).click()
     assert page.locator('.clip-select span').all_text_contents()[1].endswith(Path(files[0]).name)
@@ -262,4 +321,6 @@ except urllib.error.HTTPError as e:
     assert e.code == 403
 print(json.dumps({'browser': 'chromium', 'clips': 3, 'duration': duration, 'javascript_errors': errors,
                   'drop_import_busy_card_exclusion_preview_keys_frame_step_undo_redo': 'passed',
+                  'trim_preview_duration_reset_undo_redo_full_decode':'passed',
+                  'ui_disable_sync_after_trim':'pending_block_4b',
                   'upload_reorder_settings_reload_render_scrub_transition_preview_download_error_retry_remove_ranges': 'passed'}))

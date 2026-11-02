@@ -9,6 +9,7 @@ const names = {'reset-pulse': 'Reset Pulse', 'progressive-melt': 'Progressive Me
 const notes = {'reset-pulse': 'Real codec datamoshing: the first clear frame of the incoming video flashes back at each pulse; repeated prediction frames distort it again. Intentionally rhythmic, not a smooth dissolve.', 'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
 const clipSource = clip => clip.source_id || clip.id;
+const clipTrim = clip => ({start_frame:clip.start_frame??0,end_frame:clip.end_frame??clip.source_frames??clip.frames});
 const newEntryId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
 let copiedSettings = null;
 let altDown = false;
@@ -50,7 +51,13 @@ function controls() {
   document.querySelectorAll('.clip').forEach(card=>card.draggable=!state.busy&&!touchUI());
   document.querySelectorAll('#timeline button').forEach(b => b.disabled = state.busy || b.dataset.boundary === 'true' || (b.dataset.duplicate === 'true' && state.clips.length >= 12));
   if(state.dialogIndex!==null && state.clips[state.dialogIndex+1])updatePasteControl();
-  $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length;
+  const problem=sequenceProblem();
+  $('assemble').disabled = $('export').disabled = state.busy || !state.clips.length || Boolean(problem);
+  $('assemble').title=$('export').title=problem;
+  updateEffectAvailability();
+  const previewProblem=state.dialogIndex!==null && state.clips[state.dialogIndex+1] ? pasteProblem(setting(state.dialogIndex),state.clips[state.dialogIndex+1].frames) : '';
+  for(const id of ['preview-transition','compare-original','compare-gentler']){$(id).disabled=state.busy||Boolean(previewProblem);$(id).title=previewProblem;}
+  document.querySelectorAll('#trim-dialog button,#trim-dialog input').forEach(e=>e.disabled=state.busy);
 }
 function busy(value) { state.busy = value; controls(); }
 function button(label, action, title) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.title = title || label; b.setAttribute('aria-label', title || label); b.onclick = action; return b; }
@@ -82,7 +89,7 @@ function draw() {
     left.dataset.boundary = String(index === 0); right.dataset.boundary = String(index === state.clips.length - 1);
     const duplicate = button('⧉', () => duplicateClip(clip.id), `Duplicate ${clip.name}`); duplicate.dataset.duplicate='true';
     const duration = document.createElement('small'); duration.textContent = `${clip.duration.toFixed(2)}s`;
-    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);look.style.minWidth='0'; const appearance=document.createElement('div');appearance.className='clip-controls';appearance.append(look,duplicate);card.append(appearance);timeline.append(card);
+    actions.append(left, right, duration, button('×', () => remove(clip.id), `Remove ${clip.name}`)); card.append(actions); const look=document.createElement('select');look.className='clip-look';look.setAttribute('aria-label',`Look for ${clip.name}`);for(const [value,label]of [['original','Original'],['black-white','Black & white'],['negative-bw','B&W negative'],['negative-color','Color negative']]){const option=document.createElement('option');option.value=value;option.textContent=label;look.append(option);}look.value=clip.look||'original';look.onchange=()=>setClipLook(clip.id,look.value);look.style.minWidth='0'; const appearance=document.createElement('div');appearance.className='clip-controls';appearance.append(look,button('Trim',()=>openTrim(clip.id),`Trim ${clip.name}`),duplicate);card.append(appearance);timeline.append(card);
   });
   document.querySelector('.sequence > .hint').textContent = touchUI() ? 'Swipe to browse clips. Use the arrows to reorder. Tap a connector to set a transition.' : 'Drag clips to reorder, or use the arrows. Select the connector between clips to set a transition.';
   controls();
@@ -151,7 +158,7 @@ window.addEventListener('keydown', event => {
   if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || ![' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   if (document.activeElement?.closest('input,select,textarea,[contenteditable=true]')) return;
   const dialog = document.querySelector('dialog[open]');
-  const video = dialog ? (dialog.id === 'transition-dialog' ? $('motion-preview') : null) : player;
+  const video = dialog ? (dialog.id === 'transition-dialog' ? $('motion-preview') : dialog.id === 'trim-dialog' ? $('trim-preview') : null) : player;
   if (!video || !video.getAttribute('src') || video.readyState < 1 || !Number.isFinite(video.duration) ||
       video.closest('[hidden],details:not([open])') || !video.getClientRects().length) return;
   if (event.key === ' ') {
@@ -165,8 +172,8 @@ window.addEventListener('keydown', event => {
 });
 function clampMotion(index) {
   const conf = setting(index), available = state.clips[index + 1].frames - 1;
-  const minimum = alignedEffects.includes(conf.effect) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
-  const count = Math.max(minimum, Math.min(144, available, Math.round(conf.duration * 24)));
+  const minimum = alignedEffects.includes(conf.effect) || (smoothEffects.includes(conf.effect)&&conf.smooth) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
+  const count = Math.min(available,Math.max(minimum, Math.min(144, available, Math.round(conf.duration * 24))));
   conf.duration = count / 24;
   if (conf.release_duration != null) conf.release_duration = Math.max(1, Math.min(Math.max(1, Math.floor(count/2)), Math.round(conf.release_duration*24))) / 24;
   conf.repeat = Math.max(2, Math.min(12, Math.round(conf.repeat)));
@@ -178,10 +185,20 @@ function clampMotion(index) {
   if(conf.tempo && conf.loop_frames!==Math.floor(24*60/conf.tempo.bpm*conf.tempo.beats+.5))delete conf.tempo;
   return {conf, count, needed, maximum};
 }
+function updateEffectAvailability(index=state.dialogIndex) {
+  if(index===null || !state.clips[index+1])return;
+  const frames=state.clips[index+1].frames;
+  for(const option of $('effect').options){
+    const minimum=alignedEffects.includes(option.value)?13:option.value==='motion-loop'?4:2;
+    const disabled=frames<minimum;
+    option.toggleAttribute('disabled',disabled);
+    option.title=disabled?'The incoming trim is too short for this effect.':'';
+  }
+}
 function openTransition(index) {
   state.dialogIndex = index;
   $('transition-pair').textContent = `${state.clips[index].name} → ${state.clips[index + 1].name}`;
-  for (const mode of ['motion-loop', ...alignedEffects]) $('effect').querySelector(`[value="${mode}"]`).disabled = state.clips[index + 1].frames < (alignedEffects.includes(mode) ? 13 : 4);
+  updateEffectAvailability(index);
   updateDialog(); $('transition-dialog').showModal();
 }
 function motionFrame(play = false) {
@@ -224,7 +241,7 @@ function updateDialog() {
   $('ending').value = ending;
   $('ending-control').hidden = conf.effect === 'cut';
   $('duration-note').textContent = ending === 'flow' ? 'After this duration, normal motion continues without a hard image reset. Distortion can persist.' : 'After this duration, the clear incoming picture is restored. This can create a visible jump.';
-  $('duration').min = alignedEffects.includes(conf.effect) ? 12 : conf.effect === 'motion-loop' ? 3 : 1;
+  $('duration').min = Math.min(state.clips[state.dialogIndex+1].frames-1,alignedEffects.includes(conf.effect) || gentle ? 12 : conf.effect === 'motion-loop' ? 3 : 1);
   $('duration').max = Math.min(144, state.clips[state.dialogIndex + 1].frames - 1);
   $('duration').value = Math.round(conf.duration * 24);
   $('repeat').value = conf.repeat;
@@ -232,7 +249,7 @@ function updateDialog() {
   document.querySelector('label[for="repeat"]').firstChild.textContent = conf.effect === 'progressive-melt' ? 'Initial P-frame repetitions ' : 'P-frame repetitions ';
   $('loop-length').min = ['motion-stutter', 'reset-pulse'].includes(conf.effect) ? 4 : 2;
   document.querySelector('#loop-control .hint').textContent = conf.effect === 'reset-pulse' ? 'Each pulse restores the first frame of the incoming video. Between pulses, prediction frames are repeated to distort it again.' : conf.effect === 'motion-stutter' ? 'Pulse length: each pulse starts with a repeated prediction frame, then continues motion. The final quarter releases the stutter.' : 'A short motion sequence is repeated, pulling the previous image further each time.';
-  $('loop-length').max = Math.min(48, Math.round(conf.duration * 24) - 1, state.clips[state.dialogIndex + 1].frames - 1);
+  $('loop-length').max = Math.max(Number($('loop-length').min),Math.min(48, Math.round(conf.duration * 24) - 1, state.clips[state.dialogIndex + 1].frames - 1));
   $('loop-length').value = conf.loop_frames;
   $('motion-start').max = maximum; $('motion-start').value = Math.round(conf.motion_start * 24);
   $('motion-start').disabled = maximum === 0;
@@ -244,7 +261,7 @@ function updateDialog() {
   $('motion-start-value').value = `${start.toFixed(2)} s`;
   $('motion-window').textContent = `${start.toFixed(2)}–${(start + needed / 24).toFixed(2)} s of the incoming clip. The rest of your sequence stays in place.`;
   updatePasteControl();
-  motionFrame();
+  updateEffectAvailability(); motionFrame(); controls();
 }
 for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release']) $(id).addEventListener('input', () => {
   beginEdit();const conf = setting(state.dialogIndex);delete conf.preset;
@@ -286,6 +303,7 @@ async function waitForJob(id) {
   }
 }
 async function assemble(download = false, transitionIndex = null) {
+  const problem=sequenceProblem();if(problem){error(problem);return;}
   if (transitionIndex !== null) return previewTransition(transitionIndex);
   if (state.busy || !state.clips.length) return;
   error(); busy(true);
@@ -293,7 +311,7 @@ async function assemble(download = false, transitionIndex = null) {
   try {
     if (!state.ready) {
       $('progress').hidden = false; $('progress').value = 0; status('Preparing sequence…');
-      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(clipSource), looks:state.clips.map(c=>c.look||'original'), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
+      const job = await request('/api/jobs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({clips: state.clips.map(clipSource), looks:state.clips.map(c=>c.look||'original'),trims:state.clips.map(clipTrim), audio:state.sound, transitions: state.clips.slice(1).map((_, i) => ({...setting(i)}))})});
       state.job = job.id;
       try { sessionStorage.setItem('h4-job', job.id); } catch {}
       state.ready = await waitForJob(job.id);
@@ -316,7 +334,7 @@ async function assemble(download = false, transitionIndex = null) {
 $('sound').onchange=()=>{
   finishEdit();beginEdit();state.sound=$('sound').checked; player.muted=!state.sound;
   $('sound-label').textContent=state.sound ? 'Sound on' : 'Sound off';
-  if (!state.sound) $('motion-preview').muted=true;
+  if (!state.sound) {$('motion-preview').muted=true;$('trim-preview').muted=true;}
   try { sessionStorage.setItem('h4-audio',JSON.stringify(state.sound)); } catch {}
   invalidate();
   status(state.sound ? 'Sound on · original audio in preview and export.' : 'Sound off · preview and export are silent.');finishEdit();
@@ -333,13 +351,13 @@ async function previewTransition(index, smoothOverride = null) {
   }
   const transitions = state.clips.slice(1).map((_,i)=>({...setting(i)}));
   if (smoothOverride !== null) transitions[index].smooth = smoothOverride;
-  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>`${c.id}:${c.look||'original'}`),transitions:transitions.slice(0,index+1),index});
+  const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>[c.id,c.look||'original',clipTrim(c)]),transitions:transitions.slice(0,index+1),index});
   error(); busy(true);
   try {
     let result = transitionCache.get(key);
     if (!result) {
       status('Preparing short transition preview…');
-      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(clipSource),looks:state.clips.map(c=>c.look||'original'),transitions,audio:state.sound,preview_boundary:index})});
+      const job = await request('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:state.clips.map(clipSource),looks:state.clips.map(c=>c.look||'original'),trims:state.clips.map(clipTrim),transitions,audio:state.sound,preview_boundary:index})});
       result = await waitForJob(job.id);
       if (transitionCache.size >= 12) transitionCache.delete(transitionCache.keys().next().value);
       transitionCache.set(key,result);
@@ -383,6 +401,77 @@ player.addEventListener('timeupdate', () => {
 });
 player.addEventListener('error', () => { if (player.getAttribute('src')) error('Preview could not be loaded. Try assembling again or download the MP4.'); });
 window.addEventListener('beforeunload', () => { $('motion-preview').pause(); $('motion-preview').removeAttribute('src'); $('motion-preview').load(); abort.abort(); player.pause(); player.removeAttribute('src'); player.load(); });
+
+function sequenceProblem() {
+  for(let i=0;i<state.clips.length-1;i++){
+    const problem=pasteProblem(setting(i),state.clips[i+1].frames);
+    if(problem)return `Transition ${i+1}: ${problem}`;
+  }
+  return '';
+}
+
+function trimFrame(at, previewUrl=null, play=false) {
+  const video=$('trim-preview');
+  video.pause();
+  if(state.trimSeek)video.removeEventListener('loadedmetadata',state.trimSeek);
+  state.trimSeek=null;
+  if(state.trimPlay)video.removeEventListener('seeked',state.trimPlay);
+  state.trimPlay=null;
+  const clip=state.clips.find(c=>c.id===state.trimId);if(!clip)return;
+  const url=previewUrl||`/media/clip/${clipSource(clip)}?look=${clip.look||'original'}`;
+  const begin=()=>{state.trimPlay=null;if($('trim-dialog').open)video.play().catch(e=>{$('trim-error').textContent=e.message;});};
+  const seek=()=>{state.trimSeek=null;video.currentTime=Math.min(at,Math.max(0,video.duration-1/24));if(play){if(video.seeking){state.trimPlay=begin;video.addEventListener('seeked',begin,{once:true});}else begin();}};
+  if(video.getAttribute('src')!==url){video.src=url;video.load();}
+  if(video.readyState>=1)seek();else{state.trimSeek=seek;video.addEventListener('loadedmetadata',seek,{once:true});}
+}
+function updateTrim(changed='in') {
+  const full=state.clips.find(c=>c.id===state.trimId).source_frames;
+  let start=Number($('trim-in').value),end=Number($('trim-out').value);
+  if(changed==='in')end=Math.max(end,start+2);else start=Math.min(start,end-2);
+  start=Math.max(0,Math.min(full-2,start));end=Math.max(start+2,Math.min(full,end));
+  $('trim-in').value=start;$('trim-out').value=end;
+  $('trim-in-value').value=`${start} · ${(start/24).toFixed(3)} s`;
+  $('trim-out-value').value=`${end} · ${(end/24).toFixed(3)} s`;
+  $('trim-selection').textContent=`${end-start} frames · ${((end-start)/24).toFixed(3)} s. Out is exclusive. Apply trim to keep this range.`;
+  trimFrame((changed==='out'?end-1:start)/24);
+}
+function openTrim(id) {
+  if(state.busy)return;finishEdit();state.trimId=id;
+  const clip=state.clips.find(c=>c.id===id),full=clip.source_frames??clip.frames;
+  $('trim-title').textContent=`Trim · ${clip.name}`;$('trim-error').textContent='';
+  $('trim-in').max=full-2;$('trim-out').max=full;
+  $('trim-in').value=clipTrim(clip).start_frame;$('trim-out').value=clipTrim(clip).end_frame;
+  $('trim-dialog').showModal();updateTrim();
+}
+async function prepareTrim(apply=false) {
+  if(state.busy)return;
+  const id=state.trimId,entry=state.clips.find(c=>c.id===id),before=editorSnapshot();
+  const markers={start_frame:Number($('trim-in').value),end_frame:Number($('trim-out').value)};
+  busy(true);$('trim-error').textContent='';status('Preparing trim…');
+  try{
+    const clip=await request(`/api/clips/${clipSource(entry)}/trim`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({look:entry.look||'original',...markers})});
+    if(apply){
+      state.clips=state.clips.map(c=>c.id===id?{...clip,id,source_id:clipSource(entry)}:c);state.active=id;
+      const index=state.clips.findIndex(c=>c.id===id);if(index)clampMotion(index-1);
+      invalidate();draw();editorHistory.record(before,editorSnapshot());$('trim-dialog').close();
+      status('Trim applied. Originals stay unchanged.');
+    }else{trimFrame(0,clip.preview,true);status('Trim selection ready.');}
+  }catch(e){$('trim-error').textContent=e.message;}
+  finally{busy(false);}
+}
+$('trim-in').oninput=()=>updateTrim('in');$('trim-out').oninput=()=>updateTrim('out');
+$('trim-reset').onclick=()=>{const clip=state.clips.find(c=>c.id===state.trimId);$('trim-in').value=0;$('trim-out').value=clip.source_frames??clip.frames;updateTrim();};
+$('trim-watch').onclick=()=>prepareTrim();$('trim-apply').onclick=()=>prepareTrim(true);
+function clearTrimVideo(){
+  const video=$('trim-preview');video.pause();
+  if(state.trimSeek)video.removeEventListener('loadedmetadata',state.trimSeek);
+  if(state.trimPlay)video.removeEventListener('seeked',state.trimPlay);
+  state.trimSeek=state.trimPlay=null;video.removeAttribute('src');video.load();
+}
+$('trim-preview').addEventListener('volumechange',()=>{if(!state.sound&&!$('trim-preview').muted)$('trim-preview').muted=true;});
+$('trim-dialog').addEventListener('close',clearTrimVideo);
+$('trim-dialog').addEventListener('cancel',event=>{if(state.busy)event.preventDefault();});
+window.addEventListener('beforeunload',clearTrimVideo);
 
 function pasteProblem(conf, frames) {
   if(!conf)return 'Copy transition settings first.';

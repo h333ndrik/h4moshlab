@@ -103,5 +103,28 @@ class AudioTests(unittest.TestCase):
         self.assertLess(rms(data,0,.2),1)
         self.assertGreater(rms(data,.35,.55),100)
 
+    def test_trim_copies_exact_pcm_blocks_and_keeps_export_aligned(self):
+        original=self.clips[2]
+        trimmed=prepare(original['source'],self.root/'trimmed-audio',start_frame=7,end_frame=31,base=original)
+        expected=pcm(original['audio'])[7*2000*4:31*2000*4]
+        self.assertEqual(pcm(trimmed['audio']),expected)
+        self.assertEqual((trimmed['frames'],trimmed['source_frames']), (24,48))
+        direct=prepare(original['source'],self.root/'trimmed-direct',start_frame=7,end_frame=31)
+        self.assertEqual(pcm(direct['audio']),expected)
+        result=render([self.clips[0],trimmed],[{'effect':'classic-mosh','duration':.5}],self.root/'trimmed-export')
+        self.assertEqual(result['frames'],59)
+        self.assertEqual(result['audio_samples'],59*2000)
+        self.assertEqual(pcm(self.root/'trimmed-export/sequence.wav'),pcm(self.clips[0]['audio'])+expected[2000*4:])
+        self.assertEqual(result['full_decode'],'passed')
+        self.assertEqual(result['source_sha256'],[self.clips[0]['sha256'],original['sha256']])
+
+    def test_two_frame_trim_preserves_sample_invariant(self):
+        original=self.clips[2]
+        clip=prepare(original['source'],self.root/'audio-two-frames',start_frame=7,end_frame=9,base=original)
+        self.assertEqual(pcm(clip['audio']),pcm(original['audio'])[7*2000*4:9*2000*4])
+        result=render([clip],[],self.root/'audio-two-export')
+        self.assertEqual(result['frames'],2);self.assertEqual(result['audio_samples'],4000)
+        self.assertEqual(result['full_decode'],'passed')
+
 if __name__=='__main__':
     unittest.main()
