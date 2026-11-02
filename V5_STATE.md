@@ -1,10 +1,70 @@
 # V5.3 State
 
-Letzter Stand: 2026-10-31 20:03 CET
-Abgeschlossen: Block 3 (commit cb893482d564c80b7d7fdc72eed78b73515f830d, Tests: 41 OK)
-In Arbeit: Keine uncommittierten Implementierungsänderungen.
-Als nächstes: Block 4, Schritt 1 (framegenauer Clip-Trimmer), noch nicht begonnen.
-Letzte Testausgabe (Kurzfassung): Ran 41 tests in 142.674s — OK
+Letzter Stand: 2026-11-02 17:29 CET
+Abgeschlossen: Block 3 (commit cb893482d564c80b7d7fdc72eed78b73515f830d, Baseline: 41 OK)
+In Arbeit: Keine Implementierungsänderungen. Block 4 nach rotem Test gestoppt und vollständig zurückgesetzt.
+Als nächstes: Block 4, Normalisierungsfehler des Farbabschnitt-Tests untersuchen; Fortsetzung nur nach neuer Freigabe zur HARD-STOP-Regel.
+Letzte Testausgabe (Kurzfassung): Ran 45 tests in 151.340s — FAILED (errors=1), verworfener Block-4-Kandidat.
+
+## Block 4 stopped — no feature commit
+
+The committed application remains exactly at completed Block 3. All eleven
+uncommitted Block-4 implementation/test files were restored to HEAD after the
+failure. The existing unrelated AGENTS.md naming note was preserved separately.
+No Block 4 code was committed, and Blocks 5–8 were not started.
+
+### Actual verification
+
+Starting baseline, before implementation:
+
+```text
+Ran 41 tests in 151.315s
+OK
+```
+
+Candidate full suite:
+
+```text
+ERROR: test_frame_trim_selects_the_requested_images_and_keeps_original
+  (test_sequence.SequenceTests.test_frame_trim_selects_the_requested_images_and_keeps_original)
+Traceback (most recent call last):
+  File "tests/test_sequence.py", line 175, in test_frame_trim_selects_the_requested_images_and_keeps_original
+    clip=prepare(source,self.root/'green-trim',start_frame=12,end_frame=24)
+  File "tools/sequence.py", line 39, in prepare
+    raise ValueError('Video must normalize to at least two I/P frames.')
+ValueError: Video must normalize to at least two I/P frames.
+
+Ran 45 tests in 151.340s
+FAILED (errors=1)
+```
+
+The new test generated red/green/blue sections and attempted to select frames
+12–24. It failed during normalization validation before the trim operation.
+The actual offending VOP pattern/cause has not been established. Do not weaken
+the existing one-I/remaining-P requirement or adjust the test to hide the error.
+
+Preflight Python compilation and Node syntax checks passed before the suite.
+The chained post-suite checks did not run because unittest exited 1.
+The new exact PCM trim/export test, per-entry HTTP trim/validation test and
+project-metadata test passed in this rejected candidate, but this is NOT a
+verified Block 4 implementation. The browser smoke was interrupted after the
+unit failure and has no successful result to report.
+
+### Recovery and next diagnosis
+
+Ignored local evidence: work/v53-block4-stopped/implementation.patch,
+h4-block4-unit.log, h4-block4-baseline.log and h4-block4-smoke.log.
+The patch contains all candidate changes and tests, unchanged after failure.
+
+An additional code-review concern in the discarded candidate (not fixed after
+HARD STOP): controls() computes a preview problem from dialogIndex+1 without
+first excluding dialogIndex=null. A future retry must inspect this guard before
+browser verification; do not claim that browser behavior passed.
+
+The candidate changes touched sequence/clip_audio/server, app/index/style,
+editor-actions/editor-tools and sequence/audio/browser tests only. The effect
+algorithms were untouched. git diff HEAD -- tools web tests is empty after
+rollback. main and Blueprint identities remain the recorded values below.
 
 ## Block 3 completed
 
