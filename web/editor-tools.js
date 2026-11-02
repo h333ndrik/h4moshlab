@@ -32,9 +32,11 @@
       if(t.loop_frames!=null && (!Number.isInteger(t.loop_frames) || t.loop_frames<2 || t.loop_frames>48))throw Error('Invalid motion window.');
       if(t.preset!=null && (!Number.isInteger(t.preset)||t.preset<0||t.preset>2))throw Error('Invalid project preset.');
       if(t.random_seed!=null && (typeof t.random_seed!=='string'||!/^[a-f0-9]{16}$/.test(t.random_seed)))throw Error('Invalid random seed.');
+      if(t.audio_follow!=null && typeof t.audio_follow!=='boolean')throw Error('Invalid audio follow setting.');
+      if(t.audio_follow===true && !['motion-loop','motion-stutter','reset-pulse'].includes(t.effect))throw Error('Audio follows loop is unavailable for this effect.');
       if(t.tempo!=null && (!t.tempo || !['motion-loop','motion-stutter','reset-pulse'].includes(t.effect) || typeof t.tempo.bpm!=='number' || !Number.isFinite(t.tempo.bpm) || t.tempo.bpm<40 || t.tempo.bpm>240 || ![.25,.5,1,2,4].includes(t.tempo.beats)))throw Error('Invalid project tempo.');
     }
-    const keys=['effect','duration','motion_start','repeat','loop_frames','release_duration','ending','smooth','tempo','preset','random_seed'];
+    const keys=['effect','duration','motion_start','repeat','loop_frames','release_duration','ending','smooth','tempo','preset','random_seed','audio_follow'];
     return {format:p.format,version:1,sound:p.sound,...(p.order?{order:copy(p.order)}:{}),clips:p.clips.map(c=>({name:c.name,sha256:c.sha256,frames:c.frames,source_frames:c.source_frames??c.frames,start_frame:c.start_frame??0,end_frame:c.end_frame??c.source_frames??c.frames,speed:c.speed??1,look:c.look||'original',...(c.source_ref!=null?{source_ref:c.source_ref}:{})})),transitions:p.transitions.map(t=>Object.fromEntries(keys.filter(k=>t[k]!=null).map(k=>[k,copy(t[k])])))};
   }
   function matchProject(project,library){
@@ -82,6 +84,8 @@
     if(config.ending!=='flow'&&config.ending!=='reset')return 'The effect ending is invalid.';
     if(!/^[a-f0-9]{16}$/.test(config.random_seed||''))return 'The random seed is invalid.';
     if('preset' in config||'tempo' in config)return 'Randomized settings must be Custom without tempo.';
+    if('audio_follow' in config && typeof config.audio_follow!=='boolean')return 'The audio follow setting is invalid.';
+    if(config.audio_follow===true && !['motion-loop','motion-stutter','reset-pulse'].includes(effect))return 'Audio follows loop is unavailable for this effect.';
     const smooth=randomSmooth.includes(effect)&&config.smooth===true;
     if(config.smooth===true&&!smooth)return 'Gentler is not available for this effect.';
     if(smooth&&offset!==0)return 'Gentler needs motion start 0.';

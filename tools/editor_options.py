@@ -3,6 +3,8 @@ import math
 import re
 from effects import EFFECTS, prediction_plan
 
+AUDIO_FOLLOW_EFFECTS = ('motion-loop','motion-stutter','reset-pulse')
+
 PRESETS = {
     'classic-mosh': [dict(duration=.5),dict(duration=1.5),dict(duration=3)],
     'frame-melt': [dict(duration=1,repeat=2,smooth=True),dict(duration=2,repeat=4,smooth=True),dict(duration=3,repeat=8,smooth=True)],
@@ -30,6 +32,14 @@ def preset_settings(effect,index,frame_count):
     return config
 
 
+def validate_audio_follow(effect,value=False):
+    if type(value) is not bool:
+        raise ValueError('audio_follow must be true or false.')
+    if value and effect not in AUDIO_FOLLOW_EFFECTS:
+        raise ValueError('Audio follows loop is available only for Motion Loop, Motion Stutter and Reset Pulse.')
+    return value
+
+
 def validate_random_seed(value):
     if value is None:
         return None
@@ -47,8 +57,9 @@ def validate_project_settings(frames,transitions):
         if not isinstance(config,dict):raise ValueError('Invalid project transition.')
         validate_random_seed(config.get('random_seed'))
         effect=config.get('effect')
+        if effect not in ('cut',*EFFECTS):raise ValueError('Unsupported project effect.')
+        validate_audio_follow(effect,config.get('audio_follow',False))
         if effect=='cut':continue
-        if effect not in EFFECTS:raise ValueError('Unsupported project effect.')
         duration=config.get('duration')
         if type(duration) not in (int,float) or not math.isfinite(duration) or not 1/24<=duration<=min(6,(frame_count-1)/24):raise ValueError('Invalid project duration.')
         if config.get('ending','flow') not in ('flow','reset'):raise ValueError('Invalid effect ending.')

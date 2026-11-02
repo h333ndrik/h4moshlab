@@ -140,6 +140,53 @@ class AudioTests(unittest.TestCase):
             self.assertAlmostEqual(len(samples)/RATE,duration,delta=.002)
         self.assertEqual(digest(Path(original['source'])),original['sha256'])
 
+    def test_audio_follow_remaps_motion_loop_and_false_stays_byte_identical(self):
+        first,second=self.clips[0],self.clips[2]
+        block=2000*4
+        base={'effect':'motion-loop','duration':.5,'loop_frames':4}
+        followed=render([first,second],[{**base,'audio_follow':True}],self.root/'audio-follow-loop')
+        self.assertTrue(followed['boundaries'][0]['audio_follow'])
+        self.assertEqual(followed['audio_samples'],followed['frames']*2000)
+        self.assertEqual(followed['full_decode'],'passed')
+        donors=followed['boundaries'][0]['b_vop_indices'];count=len(donors)
+        donor_audio=pcm(second['audio'])
+        expected=b''.join(donor_audio[index*block:(index+1)*block] for index in donors)+donor_audio[(count+1)*block:]
+        output=pcm(self.root/'audio-follow-loop/sequence.wav');offset=first['frames']*block
+        self.assertEqual(output[offset:offset+len(expected)],expected)
+        self.assertEqual(len(output),followed['frames']*block)
+        off=render([first,second],[{**base,'audio_follow':False}],self.root/'audio-follow-off')
+        absent=render([first,second],[base],self.root/'audio-follow-absent')
+        self.assertEqual(off['audio_samples'],followed['audio_samples'])
+        self.assertEqual(absent['audio_samples'],followed['audio_samples'])
+        self.assertEqual((self.root/'audio-follow-off/sequence.wav').read_bytes(),(self.root/'audio-follow-absent/sequence.wav').read_bytes())
+        self.assertEqual((self.root/'audio-follow-off/sequence.m4v').read_bytes(),(self.root/'audio-follow-absent/sequence.m4v').read_bytes())
+        self.assertFalse(off['boundaries'][0]['audio_follow'])
+        self.assertEqual(off['full_decode'],'passed');self.assertEqual(absent['full_decode'],'passed')
+
+    def test_audio_follow_reset_zero_silent_and_validation(self):
+        first,second,silent=self.clips[0],self.clips[2],self.clips[1]
+        block=2000*4
+        reset=render([first,second],[{'effect':'reset-pulse','duration':.5,'loop_frames':4,'repeat':4,'audio_follow':True}],self.root/'audio-follow-reset')
+        self.assertEqual(reset['full_decode'],'passed');self.assertEqual(reset['audio_samples'],reset['frames']*2000)
+        donors=reset['boundaries'][0]['b_vop_indices'];zero_positions=[i for i,index in enumerate(donors) if index==0]
+        self.assertTrue(zero_positions)
+        donor_audio=pcm(second['audio']);output=pcm(self.root/'audio-follow-reset/sequence.wav');offset=first['frames']*block
+        for position in zero_positions:
+            self.assertEqual(output[offset+position*block:offset+(position+1)*block],donor_audio[:block])
+        mixed=render([first,second,silent],[{'effect':'motion-loop','duration':.5,'loop_frames':4,'audio_follow':True},{'effect':'cut'}],self.root/'audio-follow-mixed-report')
+        self.assertEqual([boundary['audio_follow'] for boundary in mixed['boundaries']],[True,False])
+        self.assertEqual(mixed['full_decode'],'passed')
+        silent_base={'effect':'motion-loop','duration':.5,'loop_frames':4}
+        silent_on=render([first,silent],[{**silent_base,'audio_follow':True}],self.root/'audio-follow-silent-on')
+        silent_off=render([first,silent],[{**silent_base,'audio_follow':False}],self.root/'audio-follow-silent-off')
+        self.assertEqual(silent_on['full_decode'],'passed');self.assertEqual(silent_off['full_decode'],'passed')
+        self.assertEqual(silent_on['audio_samples'],silent_on['frames']*2000)
+        self.assertEqual(pcm(self.root/'audio-follow-silent-on/sequence.wav'),pcm(self.root/'audio-follow-silent-off/sequence.wav'))
+        with self.assertRaises(ValueError):
+            render([first,second],[{**silent_base,'audio_follow':'yes'}],self.root/'audio-follow-invalid')
+        with self.assertRaises(ValueError):
+            render([first,second],[{'effect':'frame-melt','duration':.5,'audio_follow':True}],self.root/'audio-follow-unsupported')
+
     def test_two_frame_trim_preserves_sample_invariant(self):
         original=self.clips[2]
         clip=prepare(original['source'],self.root/'audio-two-frames',start_frame=7,end_frame=9,base=original)

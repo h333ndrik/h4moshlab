@@ -1,10 +1,82 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-03 00:02 CET
-Abgeschlossen: Block 6 (Randomize Mosh mit Seed); Blocks 1–6 complete; Tests: 56 OK.
+Letzter Stand: 2026-11-03 00:27 CET
+Abgeschlossen: Block 7 (Audio follows loop); Blocks 1–7 complete; Tests: 58 OK.
 In Arbeit: Keine Implementierungsänderungen.
-Als nächstes: Block 7 (Audio follows loop), noch nicht begonnen.
-Letzte Testausgabe (Kurzfassung): Ran 56 tests in 75.977s — OK; Chromium-Smoke und Randomize/Projekt/Undo-Workflow PASS.
+Als nächstes: Block 8 (A/B-Vergleich, Labels, Abschluss), noch nicht begonnen.
+Letzte Testausgabe (Kurzfassung): Ran 58 tests in 77.647s — OK; Chromium-Smoke mit Audio-follow-Export und Projekt-/Undo-Workflow PASS.
+
+## Block 7 done — optional Audio follows loop
+
+Block-7 implementation, tests, UI, documentation and this state update are one
+commit on `v5-plan`.
+
+### Implementation
+
+- Optional transition flag `audio_follow` is a strict boolean. Missing/false
+  uses the unchanged linear B-audio path; true is available for Motion Loop,
+  Motion Stutter and Reset Pulse. Wrong types and true on other effects are
+  rejected in the synchronous 400 path.
+- `assemble_audio` receives the donor index list produced by
+  `prediction_plan`. For true, transition frame `i` copies the incoming PCM
+  block `b_vop_indices[i]` (2,000 stereo 16-bit samples at 48kHz). After the
+  transition, playback resumes linearly at B block `count+1`. Reset Pulse can
+  therefore include block 0, normally skipped with B's I-frame.
+- The total sample count is still exactly `frames × 2,000`; the hard
+  `render()` audio/video timeline check remains unchanged. No pitch shift,
+  bitstream corruption or spectral processing is introduced.
+- The transition dialog shows the Audio selector only for the three supported
+  effects, defaulting to Original timeline. The hint explicitly calls this an
+  audio edit, not codec moshing.
+- Randomize preserves `audio_follow`; manual effect changes remove it when the
+  new effect does not support it. Presets and Copy/Paste preserve the
+  destination's audio choice. Undo/Redo and `.h4mosh` carry the field; old
+  projects without it load as Original timeline.
+- `audio_follow` is written into every boundary report (`true/false`),
+  including `false` for cuts.
+- AUDIO.md documents the PCM-remap principle and limits.
+
+### Actual verification
+
+```text
+Starting baseline: Ran 56 tests in 76.139s — OK
+Final suite:       Ran 58 tests in 77.647s — OK
+```
+
+New tests verify:
+
+- Motion Loop transition PCM blocks exactly equal
+  `B PCM[b_vop_indices[i] × 2000 : +2000]`.
+- Audio-follow on/off has the same exact total sample count.
+- `audio_follow=false` is byte-identical to settings without the field for
+  both `sequence.wav` and the assembled `sequence.m4v`.
+- Reset Pulse donor index 0 reads B audio block 0.
+- A silent incoming clip behaves identically with the flag on or off.
+- Mixed three-clip boundaries report the correct per-boundary true/false
+  values; every export full-decodes.
+- Project schema accepts boolean audio follow, rejects wrong types/unsupported
+  effects, and legacy projects remain compatible. Randomize retains the flag.
+- Chromium sets the selector, saves/reloads the project, preserves it through
+  Undo and Randomize, exports with audio and reports
+  `audio_samples == frames*2000` with zero JavaScript errors.
+
+All exited 0:
+
+```sh
+PYTHONPYCACHEPREFIX=work/pycache python3 -m py_compile tools/*.py tests/*.py
+node --check web/app.js
+node --check web/editor-actions.js
+node --check web/editor-tools.js
+node tests/editor_tools_test.js
+git diff --check
+```
+
+### Preserved state
+
+`origin/main` remains `c62b5c5ac2b4de8d7f779476f99ad5aae8464ffe`;
+Blueprint tag object remains `06d276234ee64dcfa537a44549aba44d23266488`.
+No merge, HTML-ID rename, resolution change, runtime dependency, new effect
+algorithm or scope change. Block 8 remains untouched.
 
 ## Block 6 done — seeded Randomize Mosh
 

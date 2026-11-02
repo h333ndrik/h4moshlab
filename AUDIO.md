@@ -24,6 +24,27 @@ then encoded as AAC at 192kbps in MP4. This preserves audio content, not compres
 source bytes or original channel layout. The picture remains 640×480 at 24fps.
 No `-shortest` cutoff is used; audio must not drop video frames or leave an extra tail.
 
+## Audio follows loop (optional)
+
+Motion Loop, Motion Stutter and Reset Pulse offer an **Audio** selector in the
+transition dialog. The default is **Original timeline**. Selecting **Follows
+loop · repeats with the effect** keeps the incoming clip's original PCM and
+reorders whole 2,000-sample blocks to match the repeated picture:
+
+- transition output frame `i` reads the incoming clip's audio block
+  `b_vop_indices[i]`;
+- a Reset Pulse donor index of 0 intentionally reuses audio block 0, the block
+  normally skipped with the incoming I-frame;
+- after the transition, the rest of the incoming clip continues linearly from
+  block `count + 1`;
+- the total sample count remains exactly `frames × 2,000`, and the hard
+  audio/video timeline check in `sequence.render()` remains active.
+
+This is a PCM block remap: the audio is reordered, never compressed-corrupted,
+pitch-shifted or spectrally processed. "The audio itself is not moshed" remains
+true. The master sound switch is independent, Randomize does not change this
+setting, and projects without `audio_follow` load with Original timeline.
+
 ## Implementation and verification
 
 `tools/clip_audio.py` aligns and caches PCM audio using FFmpeg, then streams the

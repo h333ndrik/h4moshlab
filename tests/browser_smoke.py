@@ -168,7 +168,11 @@ with sync_playwright() as p:
     page.locator('#effect').select_option('frame-melt')
     expect(page.locator('#repeat-control')).to_be_visible()
     expect(page.locator('#loop-control')).to_be_hidden()
+    expect(page.locator('#audio-follow-control')).to_be_hidden()
     page.locator('#effect').select_option('motion-loop')
+    expect(page.locator('#audio-follow-control')).to_be_visible()
+    page.locator('#audio-follow').select_option('follow')
+    expect(page.locator('#audio-follow')).to_have_value('follow')
     expect(page.locator('#ending')).to_have_value('flow')
     page.locator('#ending').select_option('reset')
     expect(page.locator('#duration-note')).to_contain_text('visible jump')
@@ -214,6 +218,8 @@ with sync_playwright() as p:
     with urllib.request.urlopen(base+'/api/jobs/'+url.rsplit('/', 1)[1]) as response:
         report = json.load(response)['result']
     assert report['boundaries'][0]['effect'] == 'motion-loop'
+    assert report['boundaries'][0]['audio_follow'] is True
+    assert report['boundaries'][1]['audio_follow'] is False
     assert report['boundaries'][0]['ending'] == 'flow'
     assert report['boundaries'][0]['reset_frame'] is None
     assert report['boundaries'][1]['ending'] == 'reset'
@@ -323,4 +329,5 @@ print(json.dumps({'browser': 'chromium', 'clips': 3, 'duration': duration, 'java
                   'drop_import_busy_card_exclusion_preview_keys_frame_step_undo_redo': 'passed',
                   'trim_preview_duration_reset_undo_redo_full_decode':'passed',
                   'ui_disable_sync_after_trim':'passed',
+                  'audio_follow_select_export_sample_count':'passed',
                   'upload_reorder_settings_reload_render_scrub_transition_preview_download_error_retry_remove_ranges': 'passed'}))

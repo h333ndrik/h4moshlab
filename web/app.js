@@ -5,6 +5,7 @@ const state = {sound:true, clips: [], settings: new Map(), active: null, busy: f
 const player = $('player');
 const smoothEffects = ['frame-melt', 'progressive-melt', 'motion-stutter'];
 const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter', 'reset-pulse'];
+const audioFollowEffects = ['motion-loop', 'motion-stutter', 'reset-pulse'];
 const names = {'reset-pulse': 'Reset Pulse', 'progressive-melt': 'Progressive Melt', 'motion-stutter': 'Motion Stutter', 'cut': 'Cut', 'classic-mosh': 'Classic Mosh', 'frame-melt': 'Frame Melt', 'loop-release': 'Loop Release', 'motion-loop': 'Motion Loop'};
 const notes = {'reset-pulse': 'Real codec datamoshing: the first clear frame of the incoming video flashes back at each pulse; repeated prediction frames distort it again. Intentionally rhythmic, not a smooth dissolve.', 'progressive-melt': 'Real codec datamoshing: repeated prediction frames gradually give way to uninterrupted motion. Lower repetitions ease the drag, not the accumulated distortion.', 'motion-stutter': 'Real codec datamoshing: repeated prediction bursts alternate with moving passages, then finish with uninterrupted motion. Original audio stays unchanged.', 'loop-release': 'Real codec datamoshing: repeated motion blocks give way to uninterrupted motion before the transition ends. Block changes can still jump. Use Continue motion for an exit without a reference reset.', 'cut': 'An ordinary cut. No datamoshing.', 'classic-mosh': 'Real codec datamoshing: B’s P-frames inherit A’s final image.', 'frame-melt': 'Real codec datamoshing: repeated compressed P-frames accumulate dragging and distortion.', 'motion-loop': 'Real codec datamoshing: a short motion sequence repeats and keeps reshaping the previous image.'};
 const abort = new AbortController();
@@ -241,6 +242,8 @@ function updateDialog() {
   $('tempo-note').textContent=conf.tempo?`${conf.tempo.bpm} BPM · ${conf.tempo.beats} beat(s) · around ${(conf.loop_frames/24).toFixed(3)} s. Each beat is rounded separately to 24fps; starts with this effect, not automatic beat detection.`:'Manual tempo, rounded to 24fps. Timing starts with this effect; no automatic beat detection.';
   $('smooth-control').hidden = !smoothEffects.includes(conf.effect);
   $('smooth').value = conf.smooth ? 'smooth' : 'original';
+  $('audio-follow-control').hidden = !audioFollowEffects.includes(conf.effect);
+  $('audio-follow').value = conf.audio_follow===true ? 'follow' : 'original';
   const gentle = smoothEffects.includes(conf.effect) && conf.smooth;
   $('release-control').hidden = !gentle;
   $('release').max = Math.max(1, Math.floor(conf.duration*12));
@@ -273,12 +276,16 @@ function updateDialog() {
   updatePasteControl();
   updateEffectAvailability(); motionFrame(); controls();
 }
-for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release']) $(id).addEventListener('input', () => {
+for (const id of ['effect', 'duration', 'ending', 'repeat', 'loop-length', 'motion-start', 'smooth', 'release', 'audio-follow']) $(id).addEventListener('input', () => {
   beginEdit();const conf = setting(state.dialogIndex);delete conf.preset;delete conf.random_seed;
   if(['effect','loop-length'].includes(id))delete conf.tempo;
   conf.effect = $('effect').value; conf.duration = Number($('duration').value) / 24; conf.repeat = Number($('repeat').value);
   conf.loop_frames = Number($('loop-length').value); conf.motion_start = Number($('motion-start').value) / 24;
-  if (id === 'effect') conf.smooth = smoothEffects.includes(conf.effect);
+  if (id === 'effect') {
+    conf.smooth = smoothEffects.includes(conf.effect);
+    if(!audioFollowEffects.includes(conf.effect))delete conf.audio_follow;
+  }
+  if (id === 'audio-follow') conf.audio_follow = $('audio-follow').value === 'follow';
   if (id === 'release') conf.release_duration = Number($('release').value)/24;
   if (id === 'smooth') conf.smooth = $('smooth').value === 'smooth';
   if (id === 'ending') conf.ending = $('ending').value;

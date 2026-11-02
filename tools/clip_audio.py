@@ -33,12 +33,16 @@ def prepare_audio(source, metadata, frames, directory, fps):
     return str(path)
 
 
-def assemble_audio(clips, transitions, directory, fps):
+def assemble_audio(clips, transitions, directory, fps, donor_indices=None):
     if not any(c.get('audio') for c in clips):
         return None, 0
     if SAMPLE_RATE % fps:
         raise ValueError('Audio requires an integer number of samples per frame.')
+    donor_indices = [None for _ in transitions] if donor_indices is None else donor_indices
+    if not isinstance(donor_indices,list) or len(donor_indices)!=len(transitions):
+        raise ValueError('One audio donor list is needed per transition.')
     samples_per_frame = SAMPLE_RATE//fps
+    frame_bytes = samples_per_frame*CHANNELS*SAMPLE_WIDTH
     destination = Path(directory)/'sequence.wav'
     expected = 0
     with wave.open(str(destination), 'wb') as target:
@@ -46,21 +50,46 @@ def assemble_audio(clips, transitions, directory, fps):
         target.setsampwidth(SAMPLE_WIDTH)
         target.setframerate(SAMPLE_RATE)
         for index, clip in enumerate(clips):
-            skip = int(index > 0 and transitions[index-1]['effect'] != 'cut')
+            transition = transitions[index-1] if index else None
+            skip = int(index > 0 and transition['effect'] != 'cut')
             count = (clip['frames']-skip)*samples_per_frame
             expected += count
             if clip.get('audio'):
                 with wave.open(clip['audio'], 'rb') as source:
                     if (source.getnchannels(), source.getsampwidth(), source.getframerate()) != (CHANNELS, SAMPLE_WIDTH, SAMPLE_RATE):
                         raise RuntimeError('Unexpected audio cache format; re-import the clip.')
-                    source.setpos(skip*samples_per_frame)
-                    remaining = count
-                    while remaining:
-                        data = source.readframes(min(16384, remaining))
-                        if not data:
-                            raise RuntimeError('Incomplete audio cache; re-import the clip.')
-                        target.writeframesraw(data)
-                        remaining -= len(data)//(CHANNELS*SAMPLE_WIDTH)
+                    follow = bool(transition and transition.get('audio_follow')) and skip
+                    if follow:
+                        donors = donor_indices[index-1]
+                        if not isinstance(donors,list) or len(donors)!=round(transition['duration']*fps):
+                            raise RuntimeError('Audio donor indices do not match the transition.')
+                        if len(donors) >= clip['frames'] or any(type(i) is not int or not 0 <= i < clip['frames'] for i in donors):
+                            raise RuntimeError('Audio donor index is outside the incoming clip.')
+                        for donor in donors:
+                            source.setpos(donor*samples_per_frame)
+                            data = source.readframes(samples_per_frame)
+                            if len(data) != frame_bytes:
+                                raise RuntimeError('Incomplete audio cache; re-import the clip.')
+                            target.writeframesraw(data)
+                        # The visual remainder starts after the transition's
+                        # count transition frames, at B block count+1.
+                        source.setpos((len(donors)+1)*samples_per_frame)
+                        remaining = (clip['frames']-1-len(donors))*samples_per_frame
+                        while remaining:
+                            data = source.readframes(min(16384, remaining))
+                            if not data:
+                                raise RuntimeError('Incomplete audio cache; re-import the clip.')
+                            target.writeframesraw(data)
+                            remaining -= len(data)//(CHANNELS*SAMPLE_WIDTH)
+                    else:
+                        source.setpos(skip*samples_per_frame)
+                        remaining = count
+                        while remaining:
+                            data = source.readframes(min(16384, remaining))
+                            if not data:
+                                raise RuntimeError('Incomplete audio cache; re-import the clip.')
+                            target.writeframesraw(data)
+                            remaining -= len(data)//(CHANNELS*SAMPLE_WIDTH)
             else:
                 remaining = count
                 while remaining:
@@ -69,7 +98,7 @@ def assemble_audio(clips, transitions, directory, fps):
                     remaining -= chunk
     with wave.open(str(destination), 'rb') as audio:
         if audio.getnframes() != expected:
-            raise RuntimeError('Assembled audio sample count mismatch.')
+            raise RuntimeError(f'Assembled audio sample count mismatch: {audio.getnframes()} instead of {expected}.')
     return str(destination), expected
 
 

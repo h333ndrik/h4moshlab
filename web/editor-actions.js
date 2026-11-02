@@ -83,7 +83,7 @@ async function applyPreset(){
   const index=state.dialogIndex,conf=setting(index);busy(true);error();
   try{
     const preset=await request('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preset',effect:conf.effect,preset:Number(selected),frames:state.clips[index+1].frames})});
-    finishEdit();beginEdit();state.settings.set(`${state.clips[index].id}|${state.clips[index+1].id}`,{...preset,preset:Number(selected)});clampMotion(index);invalidate();draw();updateDialog();finishEdit();
+    finishEdit();beginEdit();state.settings.set(`${state.clips[index].id}|${state.clips[index+1].id}`,{...preset,preset:Number(selected),...(conf.audio_follow===true?{audio_follow:true}:{})});clampMotion(index);invalidate();draw();updateDialog();finishEdit();
   }catch(e){error(e.message);}finally{busy(false);}
 }
 async function applyTempo(){

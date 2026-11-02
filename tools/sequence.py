@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
-from editor_options import validate_tempo, validate_random_seed
+from editor_options import validate_tempo, validate_random_seed, validate_audio_follow
 
 from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
 from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args, trim_audio, speed_audio
@@ -131,6 +131,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
         validate_random_seed(transition.get('random_seed'))
         if effect not in ('cut', *EFFECTS):
             raise ValueError('Unsupported effect.')
+        audio_follow=validate_audio_follow(effect,transition.get('audio_follow',False))
         if effect != 'cut':
             validate_tempo(transition)
             ending_mode(transition)
@@ -148,12 +149,13 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
             header, packets = vops(Path(clip['normalized']))
             if i == 0 or transitions[i-1]['effect'] == 'cut':
                 if i:
-                    boundaries.append({'frame': expected, 'effect': 'cut', 'duration': 0})
+                    boundaries.append({'frame': expected, 'effect': 'cut', 'duration': 0, 'audio_follow': False})
                 target.write((header if i == 0 else b'')+b''.join(packets))
                 expected += len(packets)
             else:
                 transition = transitions[i-1]
                 count = round(transition['duration']*FPS)
+                follow = validate_audio_follow(transition['effect'],transition.get('audio_follow',False))
                 ending = ending_mode(transition)
                 indices, config = prediction_plan(len(packets), transition['effect'], count, transition.get('repeat', 4),
                                                  transition.get('motion_start', 0), transition.get('loop_frames'),
@@ -162,6 +164,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
                 tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
                                    'tempo': transition.get('tempo'), 'random_seed': transition.get('random_seed'),
+                                   'audio_follow': follow,
                                    'motion_start': config['motion_start'], 'parameters': config, 'ending': ending,
                                    'reset_frame': expected+count if ending == 'reset' and count+1 < len(packets) else None,
                                    'release_b_vop_indices': list(range(count+1, len(packets))) if ending == 'flow' else [],
@@ -187,6 +190,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
                 expected += len(packets)-1
             progress(f'Assembled clip {i+1}/{len(clips)}', .35*(i+1)/len(clips))
     assembled_frames = expected
+    audio_donors = [boundary.get('b_vop_indices') for boundary in boundaries]
     video_trim, audio_trim = [], []
     preview_info = None
     if preview_boundary is not None:
@@ -203,7 +207,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
         boundaries = [boundary]
     run('ffmpeg', '-v', 'error', '-xerror', '-r', FPS, '-i', stream, *video_trim, '-f', 'null', '-')
     progress('Assembling original audio', .36)
-    audio, audio_samples = assemble_audio(clips, transitions, directory, FPS) if include_audio else (None, 0)
+    audio, audio_samples = assemble_audio(clips, transitions, directory, FPS, donor_indices=audio_donors) if include_audio else (None, 0)
     if audio and audio_samples != assembled_frames*SAMPLE_RATE//FPS:
         raise RuntimeError('Audio and video timelines do not match.')
     if audio and preview_info is not None:
