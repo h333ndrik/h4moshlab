@@ -1,12 +1,98 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-02 17:29 CET
+Letzter Stand: 2026-11-02 17:46 CET
 Abgeschlossen: Block 3 (commit cb893482d564c80b7d7fdc72eed78b73515f830d, Baseline: 41 OK)
-In Arbeit: Keine Implementierungsänderungen. Block 4 nach rotem Test gestoppt und vollständig zurückgesetzt.
-Als nächstes: Block 4, Normalisierungsfehler des Farbabschnitt-Tests untersuchen; Fortsetzung nur nach neuer Freigabe zur HARD-STOP-Regel.
-Letzte Testausgabe (Kurzfassung): Ran 45 tests in 151.340s — FAILED (errors=1), verworfener Block-4-Kandidat.
+In Arbeit: Keine Implementierungsänderungen. Zweiter Block-4-Kandidat nach HARD STOP vollständig zurückgesetzt.
+Als nächstes: Block 4, HTTP 409/400 und deaktivierte Effekt-Option untersuchen; keine Fortsetzung ohne erneute Freigabe.
+Letzte Testausgabe (Kurzfassung): Ran 50 tests in 175.435s — FAILED (failures=1); Browser-Guard ebenfalls FAILED.
 
-## Block 4 stopped — no feature commit
+## Block 4 retry: diagnosis completed, implementation stopped
+
+The latest retry was explicitly authorized. It started on the unchanged Block-3
+application: Ran 41 tests in 149.868s — OK. After the new failures, all eleven
+candidate files were restored to HEAD. No Block-4 code has been committed.
+The unrelated AGENTS.md naming note remains untouched and uncommitted.
+
+### Isolated diagnosis before implementation
+
+The exact red/green/blue fixture was recreated and normalized without any trim.
+All four looks produced 36 frames, with an unexpected extra I-VOP at frame 24:
+I positions [0,24]. Therefore the earlier failure occurred BEFORE trim, even with
+Original/no look. It was not caused by an empty short-look filter or a missing
+post-look minimum-frame check.
+
+Separately trimming source frames 12–14 or 12–15 BEFORE normalization, followed
+by each of Original, Black & white, B&W negative and Color negative, gave:
+
+- 2 frames: [I,P], all four full intermediate decodes exited 0.
+- 3 frames: [I,P,P], all four full intermediate decodes exited 0.
+- Original synthetic source SHA256 remained unchanged.
+
+Encoder isolation confirmed the cause:
+
+```text
+mpeg4 sc_threshold=0:          36 frames, I positions [0,24]
+mpeg4 sc_threshold=1000000000: 36 frames, I positions [0]
+```
+
+A zero scene threshold does not disable automatic I-VOP insertion at hard cuts.
+The rejected candidate used a lossless, look-free trim/geometry pass on the 24fps
+grid, then a separate look/MPEG-4 cache pass with automatic scene resets disabled.
+The one-initial-I/remaining-P validation remained strict; effect algorithms and
+sample-count validation were not weakened.
+
+Diagnostic script and full JSON reports: work/block4-diagnosis/ and copies under
+work/v53-block4-retry-stopped/. This diagnosis is also recorded in the state
+commit message, as requested.
+
+### Actual failures / HARD STOP
+
+Browser smoke failed first in verify_trim(), line 81:
+
+```text
+assert page.locator('#effect option[value="progressive-melt"]').is_disabled()
+AssertionError
+```
+
+Prior trim preview, duration update, fully decoded trimmed render, Undo/Redo,
+Reset and disabled Export assertions had passed. The effect-option assertion
+failed; its cause was not established and no test/implementation fix was made
+after HARD STOP.
+
+The already-running full suite then completed:
+
+```text
+FAIL: test_trim_variants_are_per_entry_and_http_rejects_invalid_markers
+  tests/test_sequence.py, line 216
+  self.assertEqual(request(endpoint,{'start_frame':start,'end_frame':end})[0],400)
+AssertionError: 409 != 400
+
+Ran 50 tests in 175.435s
+FAILED (failures=1)
+```
+
+The exact reason for the unexpected busy response is not established; do not
+change the expected invalid-marker rejection to 409 simply to pass the test.
+All 41 existing tests passed unchanged. The newly added two/three-frame tests
+for all four looks (including actual MP4 render/full decode), two-frame audio
+sample invariant, exact PCM slicing and original color-range regression also
+passed. This does not make the complete Block 4 verified.
+
+Preflight Python/Node syntax checks passed. Chained post-suite checks were not
+executed because unittest exited 1. No further tests or fixes were started after
+the first red browser result. The in-progress unittest was allowed to finish.
+
+### Recovery / committed state
+
+work/v53-block4-retry-stopped/implementation.patch contains the rejected candidate
+and unchanged tests. The directory also contains the baseline, full unit/browser
+logs, diagnostic script and report.json / thresholds.json. It is ignored/local.
+
+The committed app remains Block 3. git diff HEAD -- tools web tests is empty.
+main/Blueprint remain unchanged; no merge into editor-workflow. Only this state
+file is committed for the stopped attempt. Blocks 5–8 remain untouched.
+
+## Earlier Block 4 stopped — no feature commit
 
 The committed application remains exactly at completed Block 3. All eleven
 uncommitted Block-4 implementation/test files were restored to HEAD after the
