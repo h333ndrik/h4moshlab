@@ -78,7 +78,7 @@ def verify_trim(page):
     expect(page.locator('#assemble')).to_be_disabled()
     assert '0.5s' in page.locator('#assemble').get_attribute('title')
     page.locator('.connector').first.click()
-    # Pending: UI disable-sync after trim, assertion specified in block 4b.
+    assert page.locator('#effect option[value="progressive-melt"]').is_disabled()
     assert 'too short' in page.locator('#effect option[value="progressive-melt"]').get_attribute('title')
     expect(page.locator('#preview-transition')).to_be_disabled()
     assert page.evaluate('state.clips[1].frames')==6
@@ -89,7 +89,7 @@ def verify_trim(page):
     page.get_by_role('button',name='Close settings').click()
     page.locator('#redo').click();expect(page.locator('#assemble')).to_be_disabled(timeout=120000)
     page.locator('.connector').first.click()
-    # Pending: UI disable-sync after trim, assertion specified in block 4b.
+    assert page.locator('#effect option[value="progressive-melt"]').is_disabled()
     page.locator('#effect').select_option('classic-mosh')
     page.get_by_role('button',name='Close settings').click()
     open_trim(1);page.locator('#trim-reset').click();apply()
@@ -322,5 +322,5 @@ except urllib.error.HTTPError as e:
 print(json.dumps({'browser': 'chromium', 'clips': 3, 'duration': duration, 'javascript_errors': errors,
                   'drop_import_busy_card_exclusion_preview_keys_frame_step_undo_redo': 'passed',
                   'trim_preview_duration_reset_undo_redo_full_decode':'passed',
-                  'ui_disable_sync_after_trim':'pending_block_4b',
+                  'ui_disable_sync_after_trim':'passed',
                   'upload_reorder_settings_reload_render_scrub_transition_preview_download_error_retry_remove_ranges': 'passed'}))
