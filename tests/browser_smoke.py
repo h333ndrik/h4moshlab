@@ -160,6 +160,8 @@ with sync_playwright() as p:
     page.get_by_role('button', name=f'Move {Path(files[0]).name} left', exact=True).click()
     assert page.locator('.clip-select span').all_text_contents() == original_order
     page.locator('.connector').first.click()
+    expect(page.locator('label[for="duration"]')).to_contain_text('Effect duration')
+    expect(page.locator('label[for="ending"]')).to_contain_text('After effect')
     page.locator('#effect').select_option('cut')
     expect(page.locator('#duration-control')).to_be_hidden()
     expect(page.locator('#motion-control')).to_be_hidden()
@@ -198,6 +200,39 @@ with sync_playwright() as p:
     assert page.locator('#player').evaluate('v=>v.currentTime') == main_time
     page.get_by_role('button', name='Close settings').click()
     expect(page.locator('#motion-preview')).not_to_have_attribute('src', re.compile('.+'))
+    comparison_settings=page.evaluate('({...setting(0)})')
+    comparison_history=page.evaluate('editorHistory.past.length')
+    comparison_jobs=[]
+    def record_comparison_job(request):
+        if request.method=='POST' and request.url.endswith('/api/jobs'):
+            comparison_jobs.append(json.loads(request.post_data or '{}'))
+    page.on('request',record_comparison_job)
+    page.locator('.connector').first.click();page.locator('#compare-classic').click()
+    expect(page.locator('#preview-label')).to_have_text('Transition preview · Classic Mosh (comparison)')
+    expect(page.locator('#comparison-back')).to_be_visible()
+    assert page.evaluate('({...setting(0)})')==comparison_settings
+    assert page.evaluate('editorHistory.past.length')==comparison_history
+    assert len(comparison_jobs)==1
+    assert comparison_jobs[0]['preview_boundary']==0
+    assert comparison_jobs[0]['transitions'][0]=={'effect':'classic-mosh','duration':comparison_settings['duration'],'motion_start':comparison_settings['motion_start'],'repeat':4,'loop_frames':12}
+    page.locator('#comparison-back').click()
+    expect(page.locator('#preview-label')).to_contain_text('Transition preview · Motion Loop')
+    expect(page.locator('#comparison-back')).to_be_hidden()
+    assert page.evaluate('({...setting(0)})')==comparison_settings
+    assert len(comparison_jobs)==2
+    page.locator('.connector').first.click();page.locator('#compare-classic').click()
+    expect(page.locator('#preview-label')).to_have_text('Transition preview · Classic Mosh (comparison)')
+    assert len(comparison_jobs)==2
+    page.locator('#comparison-back').click();expect(page.locator('#comparison-back')).to_be_hidden()
+    page.locator('.connector').first.click();page.locator('#compare-frame-melt').click()
+    expect(page.locator('#preview-label')).to_have_text('Transition preview · Frame Melt (comparison)')
+    assert len(comparison_jobs)==3
+    assert comparison_jobs[2]['transitions'][0]=={'effect':'frame-melt','duration':comparison_settings['duration'],'motion_start':comparison_settings['motion_start'],'repeat':4,'loop_frames':12}
+    page.locator('#comparison-back').click()
+    expect(page.locator('#comparison-back')).to_be_hidden()
+    assert page.evaluate('({...setting(0)})')==comparison_settings
+    assert page.evaluate('editorHistory.past.length')==comparison_history
+    page.remove_listener('request',record_comparison_job)
     page.locator('.connector').nth(1).click()
     page.locator('#effect').select_option('classic-mosh')
     page.locator('#duration').fill('12')
@@ -330,4 +365,5 @@ print(json.dumps({'browser': 'chromium', 'clips': 3, 'duration': duration, 'java
                   'trim_preview_duration_reset_undo_redo_full_decode':'passed',
                   'ui_disable_sync_after_trim':'passed',
                   'audio_follow_select_export_sample_count':'passed',
+                  'comparison_preview_cache_settings_undo_labels':'passed',
                   'upload_reorder_settings_reload_render_scrub_transition_preview_download_error_retry_remove_ranges': 'passed'}))

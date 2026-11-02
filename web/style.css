@@ -39,3 +39,5 @@ footer{position:relative}
 .visit:hover{opacity:1;border-color:#777}
 
 #preset-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}#preset-control label{margin-top:20px}#randomize-transition{margin-top:20px}#randomize-note{grid-column:1/-1;margin:0}
+
+#effect-comparison{margin-top:16px}#comparison-back{padding:6px 10px;font-size:11px}

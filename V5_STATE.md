@@ -1,10 +1,87 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-03 00:27 CET
-Abgeschlossen: Block 7 (Audio follows loop); Blocks 1–7 complete; Tests: 58 OK.
-In Arbeit: Keine Implementierungsänderungen.
-Als nächstes: Block 8 (A/B-Vergleich, Labels, Abschluss), noch nicht begonnen.
-Letzte Testausgabe (Kurzfassung): Ran 58 tests in 77.647s — OK; Chromium-Smoke mit Audio-follow-Export und Projekt-/Undo-Workflow PASS.
+Letzter Stand: 2026-11-03 01:03 CET
+Abgeschlossen: V5.3 Blocks 1–8; Tests: 58 OK.
+In Arbeit: Keine.
+Als nächstes: User review of the completed V5.3 branch.
+Letzte Testausgabe (Kurzfassung): Ran 58 tests in 87.134s — OK; Chromium-Smoke und erweiterter Editor-Workflow PASS, keine JavaScript-Fehler.
+
+## Block 8 done — comparison preview, labels, V5.3 completion
+
+Block-8 implementation, browser coverage, documentation and this state update are
+one commit on `v5-plan`.
+
+### Implementation
+
+- The transition dialog exposes `Preview as Classic Mosh` and
+  `Preview as Frame Melt` for non-cut effects. Each calls the existing
+  `previewTransition()` path and `transitionCache` (maximum 12); no server
+  endpoint or effect algorithm was added.
+- A comparison request keeps the boundary index, `duration` and
+  `motion_start`, temporarily substitutes Classic Mosh or Frame Melt, and uses
+  the required `repeat=4` / `loop_frames=12` defaults. Rendering is still a
+  normal `preview_boundary` job.
+- Comparison state is display-only: it does not mutate `state.settings`,
+  project/session settings, Undo history or the incoming clip's aligned-effect
+  constraints. The preview label names the comparison, and
+  `Back to actual transition` renders the saved settings again.
+- Comparison and back controls are disabled while busy or when client guards
+  show that the boundary cannot produce a valid preview. Both draw and back use
+  the current trimmed/speed-adjusted frame count.
+- Display text now reads `Effect duration` and `After effect`. Existing IDs
+  (`duration`, `ending`, `motion-start`, `loop-length`, `repeat`, `effect`) and
+  all preset, Randomize, project and session-storage behavior remain unchanged.
+- The extended Chromium workflow exposed a stale-dialog-target access during
+  clip removal/Undo. `controls()` now verifies the target clip before evaluating
+  comparison guards; the full workflow passes with zero page errors.
+
+### Actual verification
+
+```text
+Starting baseline: Ran 58 tests in 77.533s — OK
+Final suite:       Ran 58 tests in 87.134s — OK
+```
+
+Chromium smoke:
+
+```text
+{"browser": "chromium", "clips": 3, "duration": 5.916667, "javascript_errors": [],
+ "comparison_preview_cache_settings_undo_labels": "passed",
+ "audio_follow_select_export_sample_count": "passed",
+ "ui_disable_sync_after_trim": "passed", ...}
+```
+
+The smoke asserts the new labels, exact comparison payload defaults,
+comparison cache reuse, settings/history immutability, back-to-actual rendering
+and zero JavaScript errors. The extended editor workflow also passed imports,
+removals, reorder, slider gestures, sound, looks, speed, presets, seeded
+Randomize, audio-follow, project save/Undo, BPM, real export, cold-server hash
+relink and narrow layout.
+
+All exited 0:
+
+```sh
+PYTHONPYCACHEPREFIX=work/pycache python3 -m py_compile tools/*.py tests/*.py
+node --check web/app.js
+node --check web/editor-actions.js
+node --check web/editor-tools.js
+node tests/editor_tools_test.js
+git diff --check
+```
+
+Layout evidence: `work/block8/desktop.png` and `work/block8/mobile.png`
+(390px); both show Randomize, the Audio selector, the two comparison actions
+and the updated labels.
+
+### Preserved state
+
+`origin/main` remains `c62b5c5ac2b4de8d7f779476f99ad5aae8464ffe`;
+Blueprint tag object remains `06d276234ee64dcfa537a44549aba44d23266488`.
+No merge, HTML-ID rename, resolution change, runtime dependency, export-button
+change, audio-invariant change or new effect algorithm. `editor-workflow` was
+not merged or updated.
+
+state: block 8 done; V5.3 complete
 
 ## Block 7 done — optional Audio follows loop
 

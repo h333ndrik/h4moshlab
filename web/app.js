@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const transitionCache = new Map();
-const state = {sound:true, clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, trimId: null, speedId: null, previewEnd: null, sequencePosition: 0};
+const state = {sound:true, clips: [], settings: new Map(), active: null, busy: false, ready: null, job: null, dialogIndex: null, trimId: null, speedId: null, comparison: null, previewEnd: null, sequencePosition: 0};
 const player = $('player');
 const smoothEffects = ['frame-melt', 'progressive-melt', 'motion-stutter'];
 const alignedEffects = ['loop-release', 'progressive-melt', 'motion-stutter', 'reset-pulse'];
@@ -22,6 +22,7 @@ const touchUI = () => window.matchMedia('(pointer:coarse)').matches;
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message) { $('status').textContent = message; }
 function source(url, label) {
+  if (state.comparison && !label.includes('(comparison)')) clearComparisonPreview();
   if (state.ready && player.readyState >= 1 && player.getAttribute('src') === state.ready.url && url !== state.ready.url) state.sequencePosition = player.currentTime;
   if (state.pendingSeek) { player.removeEventListener('loadedmetadata', state.pendingSeek); state.pendingSeek = null; }
   if (player.getAttribute('src') !== url) { player.pause(); player.removeAttribute('src'); player.load(); player.src = url; player.load(); }
@@ -34,6 +35,7 @@ function setting(index) {
   return conf;
 }
 function invalidate() {
+  clearComparisonPreview();
   try { sessionStorage.removeItem('h4-job'); } catch {}
   try { sessionStorage.setItem('h4-sequence', JSON.stringify({order: state.clips.map(c => c.id), entries: state.clips, settings: [...state.settings]})); } catch {}
   state.ready = null; state.previewEnd = null; state.sequencePosition = 0;
@@ -60,6 +62,12 @@ function controls() {
   updateRandomizeControl();
   const previewProblem=state.dialogIndex!==null && state.clips[state.dialogIndex+1] ? pasteProblem(setting(state.dialogIndex),state.clips[state.dialogIndex+1].frames) : '';
   for(const id of ['preview-transition','compare-original','compare-gentler']){$(id).disabled=state.busy||Boolean(previewProblem);$(id).title=previewProblem;}
+  for(const [id,effect] of [['compare-classic','classic-mosh'],['compare-frame-melt','frame-melt']]){
+    const target=state.dialogIndex===null?null:state.clips[state.dialogIndex+1];
+    const problem=state.busy?'Wait until processing finishes.':!target?'Choose a transition first.':comparisonProblem(setting(state.dialogIndex),target.frames,effect);
+    $(id).disabled=Boolean(problem);$(id).title=problem||`Preview this boundary as ${names[effect]} without changing settings.`;
+  }
+  $('comparison-back').disabled=state.busy;
   document.querySelectorAll('#trim-dialog button,#trim-dialog input,#speed-dialog button,#speed-dialog input').forEach(e=>e.disabled=state.busy);
   if(state.speedId)updateSpeed();
 }
@@ -244,6 +252,7 @@ function updateDialog() {
   $('smooth').value = conf.smooth ? 'smooth' : 'original';
   $('audio-follow-control').hidden = !audioFollowEffects.includes(conf.effect);
   $('audio-follow').value = conf.audio_follow===true ? 'follow' : 'original';
+  $('effect-comparison').hidden = conf.effect === 'cut';
   const gentle = smoothEffects.includes(conf.effect) && conf.smooth;
   $('release-control').hidden = !gentle;
   $('release').max = Math.max(1, Math.floor(conf.duration*12));
@@ -334,6 +343,7 @@ async function assemble(download = false, transitionIndex = null) {
   const problem=sequenceProblem();if(problem){error(problem);return;}
   if (transitionIndex !== null) return previewTransition(transitionIndex);
   if (state.busy || !state.clips.length) return;
+  clearComparisonPreview();
   error(); busy(true);
   const prepared = Boolean(state.ready);
   try {
@@ -368,9 +378,21 @@ $('sound').onchange=()=>{
   status(state.sound ? 'Sound on · original audio in preview and export.' : 'Sound off · preview and export are silent.');finishEdit();
 };
 $('assemble').onclick = () => assemble(); $('export').onclick = () => assemble(true);
-async function previewTransition(index, smoothOverride = null) {
+function clearComparisonPreview(){
+  state.comparison=null;
+  if($('comparison-back'))$('comparison-back').hidden=true;
+}
+function comparisonTransition(conf,effect){
+  return {effect,duration:conf.duration,motion_start:conf.motion_start??0,repeat:4,loop_frames:12};
+}
+function comparisonProblem(conf,frames,effect){
+  if(conf.effect==='cut')return 'Choose a mosh effect first.';
+  return pasteProblem(comparisonTransition(conf,effect),frames);
+}
+async function previewTransition(index, smoothOverride = null, comparisonEffect = null) {
   if (state.busy) return;
-  if (state.ready && smoothOverride === null) {
+  if (state.ready && smoothOverride === null && comparisonEffect === null) {
+    clearComparisonPreview();
     showResult(state.ready);
     const boundary = state.ready.result.boundaries[index];
     seek(Math.max(0, boundary.frame/24-.75), boundary.frame/24+boundary.duration+.75);
@@ -379,6 +401,7 @@ async function previewTransition(index, smoothOverride = null) {
   }
   const transitions = state.clips.slice(1).map((_,i)=>({...setting(i)}));
   if (smoothOverride !== null) transitions[index].smooth = smoothOverride;
+  if (comparisonEffect !== null) transitions[index] = comparisonTransition(setting(index),comparisonEffect);
   const key = JSON.stringify({audio:state.sound,clips:state.clips.slice(0,index+2).map(c=>[c.id,c.look||'original',clipTrim(c),clipSpeed(c)]),transitions:transitions.slice(0,index+1),index});
   error(); busy(true);
   try {
@@ -391,14 +414,25 @@ async function previewTransition(index, smoothOverride = null) {
       transitionCache.set(key,result);
     }
     state.previewEnd = null;
-    source(result.url, `Transition preview · ${names[transitions[index].effect]}${smoothOverride === null ? '' : smoothOverride ? ' · Gentler' : ' · Original'}`);
+    if(comparisonEffect!==null){state.comparison={index,effect:comparisonEffect};source(result.url,`Transition preview · ${names[comparisonEffect]} (comparison)`);$('comparison-back').hidden=false;}
+    else{clearComparisonPreview();source(result.url,`Transition preview · ${names[transitions[index].effect]}${smoothOverride === null ? '' : smoothOverride ? ' · Gentler' : ' · Original'}`);}
     seek(0,null);
-    status(`Ready · short preview ${result.result.duration.toFixed(2)}s · verified full decode. Assemble preview or Export MP4 uses the complete sequence.`);
-  } catch(e) { error(e.message); status('Transition preview failed. Retry or assemble the sequence.'); }
+    status(`Ready · ${comparisonEffect!==null?'comparison ':''}short preview ${result.result.duration.toFixed(2)}s · verified full decode. Assemble preview or Export MP4 uses the complete sequence.`);
+  } catch(e) { if(comparisonEffect!==null)clearComparisonPreview(); error(e.message); status('Transition preview failed. Retry or assemble the sequence.'); }
   finally { busy(false); $('progress').hidden=true; }
 }
 for (const [id,gentle] of [['compare-original',false],['compare-gentler',true]]) $(id).onclick=()=>{
   const index=state.dialogIndex; $('transition-dialog').close(); previewTransition(index,gentle);
+};
+for (const [id,effect] of [['compare-classic','classic-mosh'],['compare-frame-melt','frame-melt']]) $(id).onclick=()=>{
+  if(state.busy)return;
+  const index=state.dialogIndex,problem=comparisonProblem(setting(index),state.clips[index+1].frames,effect);
+  if(problem){error(problem);return;}
+  $('transition-dialog').close();previewTransition(index,null,effect);
+};
+$('comparison-back').onclick=()=>{
+  if(state.busy||!state.comparison)return;
+  const index=state.comparison.index;clearComparisonPreview();previewTransition(index);
 };
 $('mark-motion-start').onclick=()=>{
   finishEdit();beginEdit();const index=state.dialogIndex, conf=setting(index);delete conf.preset;delete conf.random_seed;
