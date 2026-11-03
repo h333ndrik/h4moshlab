@@ -1,11 +1,11 @@
 # V5.3 State
 
 Letzter Stand: 2026-11-03 04:44 CET
-Status: V5.3 merged into editor-workflow; awaiting user review.
+Status: V5.3 merged into editor-workflow; project complete.
 Abgeschlossen: V5.3 Blocks 1–8; Tests: 58 OK after merge.
 In Arbeit: Keine.
-Als nächstes: User review.
-Letzte Testausgabe (Kurzfassung): Ran 58 tests in 83.573s — OK; Chromium-Smoke PASS, keine JavaScript-Fehler.
+Als nächstes: Keine; release complete, awaiting user review.
+Letzte Testausgabe (Kurzfassung): Ran 58 tests in 76.824s — OK; Chromium-Smoke PASS, keine JavaScript-Fehler.
 
 ## V5.3 merged into editor-workflow
 
@@ -18,7 +18,7 @@ Letzte Testausgabe (Kurzfassung): Ran 58 tests in 83.573s — OK; Chromium-Smoke
 - `origin/main` and `h4-moshlab-blueprint-1` remain untouched. No squash or
   force-push was used.
 
-state: V5.3 merged into editor-workflow; awaiting user review.
+state: V5.3 merged; project complete.
 
 ## Block 8 done — comparison preview, labels, V5.3 completion
 
