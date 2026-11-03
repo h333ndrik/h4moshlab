@@ -11,8 +11,8 @@ function updateHistoryControls(){
   document.getElementById('open-project').disabled=state.busy;
 }
 async function restoreEditor(snapshot){
-  await request('/api/sequence/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:snapshot.clips.map(c=>c.id),looks:Object.fromEntries(snapshot.clips.map(c=>[c.id,c.look||'original']))})});
-  state.clips=H4EditorTools.copy(snapshot.clips);state.settings=new Map(H4EditorTools.copy(snapshot.settings));state.active=snapshot.active;state.sound=snapshot.sound;
+  const restored=await request('/api/sequence/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clips:snapshot.clips.map(clipSource),looks:snapshot.clips.map(c=>c.look||'original'),trims:snapshot.clips.map(clipTrim),speeds:snapshot.clips.map(clipSpeed)})});
+  state.clips=H4EditorTools.copy(snapshot.clips).map((c,i)=>({...c,...restored.clips[i],id:c.id,source_id:clipSource(c)}));state.settings=new Map(H4EditorTools.copy(snapshot.settings));state.active=snapshot.active;state.sound=snapshot.sound;
   $('sound').checked=state.sound;player.muted=!state.sound;$('sound-label').textContent=state.sound?'Sound on':'Sound off';
   try{sessionStorage.setItem('h4-audio',JSON.stringify(state.sound));}catch{}
   invalidate();draw();
@@ -26,7 +26,7 @@ async function travelHistory(redo=false){
 }
 function downloadProject(){
   finishEdit();if(!state.clips.length)return;
-  const project={format:'h4-mosh-project',version:1,sound:state.sound,clips:state.clips.map(c=>({name:c.name,sha256:c.sha256,frames:c.frames,look:c.look||'original'})),transitions:state.clips.slice(1).map((_,i)=>({...setting(i)}))};
+  const project={format:'h4-mosh-project',version:1,sound:state.sound,order:state.clips.map(clipSource),clips:state.clips.map(c=>({name:c.name,sha256:c.sha256,frames:c.frames,source_frames:c.source_frames??c.frames,...clipTrim(c),speed:clipSpeed(c),look:c.look||'original'})),transitions:state.clips.slice(1).map((_,i)=>({...setting(i)}))};
   H4EditorTools.validateProject(project);
   const url=URL.createObjectURL(new Blob([JSON.stringify(project,null,2)+'\n'],{type:'application/json'}));
   const link=document.createElement('a');link.href=url;link.download='h4-mosh-project.h4mosh';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -36,9 +36,16 @@ let pendingProject=null;
 function missingProjectFiles(matches){return pendingProject.clips.filter((_,i)=>!matches[i]);}
 async function completeProject(matches){
   if(matches.some(c=>!c))return false;
-  await request('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'validate_project',frames:matches.map(c=>c.frames),transitions:pendingProject.transitions})});
-  const settings=matches.slice(1).map((c,i)=>[`${matches[i].id}|${c.id}`,pendingProject.transitions[i]]);
-  finishEdit();beginEdit();await restoreEditor({clips:matches.map((c,i)=>({...c,look:pendingProject.clips[i].look||'original',preview:`/media/clip/${c.id}?look=${pendingProject.clips[i].look||'original'}`,thumbnail:`/media/thumb/${c.id}?look=${pendingProject.clips[i].look||'original'}`})),settings,active:matches[0].id,sound:pendingProject.sound});finishEdit();
+  if(matches.some((c,i)=>(c.source_frames??c.frames)!==pendingProject.clips[i].source_frames))throw Error('Project source length does not match the original.');
+  await request('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'validate_project',frames:pendingProject.clips.map(c=>c.frames),transitions:pendingProject.transitions})});
+  const seen=new Set();
+  const entries=matches.map((c,i)=>{
+    const source_id=c.id,id=seen.has(source_id)?newEntryId():source_id;seen.add(source_id);
+    const look=pendingProject.clips[i].look||'original';
+    return {...c,id,source_id,look,speed:pendingProject.clips[i].speed??1,...clipTrim(pendingProject.clips[i]),frames:pendingProject.clips[i].frames,duration:pendingProject.clips[i].frames/24,preview:`/media/clip/${source_id}?look=${look}&start_frame=${pendingProject.clips[i].start_frame??0}&end_frame=${pendingProject.clips[i].end_frame??pendingProject.clips[i].source_frames??pendingProject.clips[i].frames}&speed=${pendingProject.clips[i].speed??1}`,thumbnail:`/media/thumb/${source_id}?look=${look}&start_frame=${pendingProject.clips[i].start_frame??0}&end_frame=${pendingProject.clips[i].end_frame??pendingProject.clips[i].source_frames??pendingProject.clips[i].frames}&speed=${pendingProject.clips[i].speed??1}`};
+  });
+  const settings=entries.slice(1).map((c,i)=>[`${entries[i].id}|${c.id}`,H4EditorTools.copy(pendingProject.transitions[i])]);
+  finishEdit();beginEdit();await restoreEditor({clips:entries,settings,active:entries[0].id,sound:pendingProject.sound});finishEdit();
   pendingProject=null;$('project-dialog').close();status('Project opened. Original videos matched by file hash.');return true;
 }
 async function openProjectFile(file){
@@ -76,7 +83,7 @@ async function applyPreset(){
   const index=state.dialogIndex,conf=setting(index);busy(true);error();
   try{
     const preset=await request('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preset',effect:conf.effect,preset:Number(selected),frames:state.clips[index+1].frames})});
-    finishEdit();beginEdit();state.settings.set(`${state.clips[index].id}|${state.clips[index+1].id}`,{...preset,preset:Number(selected)});clampMotion(index);invalidate();draw();updateDialog();finishEdit();
+    finishEdit();beginEdit();state.settings.set(`${state.clips[index].id}|${state.clips[index+1].id}`,{...preset,preset:Number(selected),...(conf.audio_follow===true?{audio_follow:true}:{})});clampMotion(index);invalidate();draw();updateDialog();finishEdit();
   }catch(e){error(e.message);}finally{busy(false);}
 }
 async function applyTempo(){
@@ -84,7 +91,7 @@ async function applyTempo(){
   try{
     const tempo=await request('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'tempo',effect:conf.effect,bpm,beats})});
     if(tempo.loop_frames>=state.clips[index+1].frames-1)throw Error('This clip is too short for that interval. Choose fewer beats.');
-    finishEdit();beginEdit();delete conf.preset;conf.loop_frames=tempo.loop_frames;conf.duration=Math.max(conf.duration,(tempo.loop_frames+1)/24);conf.tempo={bpm,beats};clampMotion(index);invalidate();draw();updateDialog();finishEdit();
+    finishEdit();beginEdit();delete conf.preset;delete conf.random_seed;conf.loop_frames=tempo.loop_frames;conf.duration=Math.max(conf.duration,(tempo.loop_frames+1)/24);conf.tempo={bpm,beats};clampMotion(index);invalidate();draw();updateDialog();finishEdit();
   }catch(e){error(e.message);}finally{busy(false);}
 }
 window.addEventListener('DOMContentLoaded',()=>{
@@ -107,7 +114,25 @@ window.addEventListener('DOMContentLoaded',()=>{
 async function setClipLook(id,look){
   if(state.busy)return;finishEdit();const before=editorSnapshot();busy(true);error();status('Preparing clip look…');
   try{
-    const clip=await request(`/api/clips/${id}/look`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({look})});
-    state.clips=state.clips.map(c=>c.id===id?clip:c);state.active=id;invalidate();draw();editorHistory.record(before,editorSnapshot());status('Clip look ready. Originals stay unchanged.');
+    const entry=state.clips.find(c=>c.id===id);if(!entry)return;
+    const clip=await request(`/api/clips/${clipSource(entry)}/look`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({look,speed:clipSpeed(entry),...clipTrim(entry)})});
+    state.clips=state.clips.map(c=>c.id===id?{...clip,id,source_id:clipSource(entry)}:c);state.active=id;invalidate();draw();editorHistory.record(before,editorSnapshot());status('Clip look ready. Originals stay unchanged.');
   }catch(e){error(e.message);draw();}finally{busy(false);}
 }
+
+function duplicateClip(id, to = null) {
+  if(state.busy)return;
+  if(state.clips.length>=12){error('Choose at most 12 clips in total.');return;}
+  const from=state.clips.findIndex(c=>c.id===id);if(from<0)return;
+  const inherited=from ? H4EditorTools.copy(setting(from-1)) : null;
+  finishEdit();beginEdit();
+  const copy={...H4EditorTools.copy(state.clips[from]),id:newEntryId(),source_id:clipSource(state.clips[from])};
+  const position=to===null ? from+1 : Math.max(0,Math.min(state.clips.length,to));
+  state.clips.splice(position,0,copy);state.active=copy.id;
+  if(position && inherited)state.settings.set(`${state.clips[position-1].id}|${copy.id}`,inherited);
+  invalidate();draw();finishEdit();
+}
+
+window.addEventListener('keydown',event=>{
+  if((event.metaKey||event.ctrlKey)&&!event.altKey&&event.key.toLowerCase()==='d'&&!event.target.closest('input,select,textarea,[contenteditable=true]')&&!document.querySelector('dialog[open]')&&state.active&&!state.busy){event.preventDefault();duplicateClip(state.active);}
+});

@@ -45,6 +45,9 @@ class EditorAPITests(unittest.TestCase):
                 self.assertEqual(request('/api/settings','POST',{'action':'tempo','effect':'classic-mosh','bpm':120,'beats':1})[0],400)
                 self.assertEqual(request('/api/settings','POST',{'action':'preset','effect':'frame-melt','preset':0,'frames':48})[0],200)
                 self.assertEqual(request('/api/settings','POST',{'action':'validate_project','frames':[48,48],'transitions':[{'effect':'reset-pulse','duration':1,'loop_frames':8,'tempo':{'bpm':120,'beats':1}}]})[0],400)
+                self.assertEqual(request('/api/settings','POST',{'action':'validate_project','frames':[48,48],'transitions':[{'effect':'motion-loop','duration':1,'loop_frames':8,'audio_follow':True}]})[0],200)
+                self.assertEqual(request('/api/settings','POST',{'action':'validate_project','frames':[48,48],'transitions':[{'effect':'motion-loop','duration':1,'loop_frames':8,'audio_follow':'yes'}]})[0],400)
+                self.assertEqual(request('/api/settings','POST',{'action':'validate_project','frames':[48,48],'transitions':[{'effect':'frame-melt','duration':1,'audio_follow':True}]})[0],400)
                 self.assertEqual(request('/api/sequence/restore','POST',{'clips':[]},{'Origin':'https://elsewhere.example'})[0],403)
                 self.assertEqual(list(app.clips),[identifier])
             finally:

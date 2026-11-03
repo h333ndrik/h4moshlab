@@ -4,35 +4,106 @@ import json
 import math
 from pathlib import Path
 import subprocess
-from editor_options import validate_tempo
+from editor_options import validate_tempo, validate_random_seed, validate_audio_follow
 
 from effects import EFFECTS, SMOOTH_EFFECTS, prediction_plan
-from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args
-from mosh import WIDTH, HEIGHT, digest, normalize, probe, run, vops
+from clip_audio import SAMPLE_RATE, prepare_audio, assemble_audio, encoding_args, trim_audio, speed_audio
+from mosh import WIDTH, HEIGHT, digest, probe, run, vops, LOOKS
 
 FPS = 24
 
 
-def prepare(source, directory, look='original'):
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    metadata = probe(source)
-    videos = [s for s in metadata['streams'] if s['codec_type'] == 'video']
-    duration = float(videos[0].get('duration', metadata['format'].get('duration', 0))) if videos else 0
-    if not videos or not math.isfinite(duration) or not 0 < duration <= 120:
+def trim_bounds(frames, start_frame=0, end_frame=None):
+    end_frame = frames if end_frame is None else end_frame
+    if type(start_frame) is not int or type(end_frame) is not int or not 0 <= start_frame < end_frame <= frames or end_frame-start_frame < 2:
+        raise ValueError('Trim needs integer frame markers within the source and at least 2 frames.')
+    return start_frame, end_frame
+
+
+def speed_bounds(speed):
+    if type(speed) not in (int,float) or not math.isfinite(speed):
+        raise ValueError('Speed must be a number from 0.1x to 4.0x in 0.1 steps.')
+    value=round(float(speed),1)
+    if abs(float(speed)-value)>1e-9 or not .1<=value<=4:
+        raise ValueError('Speed must be a number from 0.1x to 4.0x in 0.1 steps.')
+    return value
+
+
+def speed_frame_count(frames, speed):
+    speed=speed_bounds(speed)
+    count=int(math.floor(frames/speed+.5))
+    if not 2<=count<=2880:
+        raise ValueError('Speed must keep the clip between 2 frames and 120 seconds.')
+    return count
+
+
+def frame_count(source):
+    output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-i',str(source),'-map','0:v:0',
+        '-vf','setpts=PTS-STARTPTS,fps=24','-an','-fps_mode','passthrough','-progress','pipe:1','-nostats','-f','null','-'],text=True)
+    return int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
+
+
+def prepare(source, directory, look='original', start_frame=0, end_frame=None, base=None, speed=1.0):
+    directory=Path(directory)
+    directory.mkdir(parents=True,exist_ok=True)
+    metadata=probe(source)
+    videos=[s for s in metadata['streams'] if s['codec_type']=='video']
+    duration=float(videos[0].get('duration',metadata['format'].get('duration',0))) if videos else 0
+    if not videos or not math.isfinite(duration) or not 0<duration<=120:
         raise ValueError('Use a video between 0 and 120 seconds.')
-    normalized = directory/'clip.m4v'
-    normalize(source, normalized, max_seconds=None, look=look)
-    header, packets = vops(normalized)
-    if len(packets) < 2 or [p[4] >> 6 for p in packets] != [0]+[1]*(len(packets)-1):
-        raise ValueError('Video must normalize to at least two I/P frames.')
-    audio = prepare_audio(source, metadata, len(packets), directory, FPS)
-    preview = directory/'preview.mp4'
-    run('ffmpeg', '-v', 'error', '-y', '-r', FPS, '-i', normalized, *encoding_args(audio),
-        '-c:v', 'libx264', '-threads', '2', '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', preview)
-    run('ffmpeg', '-v', 'error', '-y', '-i', preview, '-frames:v', '1', directory/'thumb.jpg')
-    return {'look':look, 'source': str(source), 'normalized': str(normalized), 'preview': str(preview), 'audio': audio,
-            'frames': len(packets), 'duration': len(packets)/FPS, 'sha256': digest(Path(source))}
+    if look not in LOOKS:raise ValueError('Unsupported clip look.')
+    speed=speed_bounds(speed)
+    source_frames=base.get('source_frames',base['frames']) if base is not None else None
+    if source_frames is None and (start_frame!=0 or end_frame is not None or speed!=1):source_frames=frame_count(source)
+    if source_frames is not None:start_frame,end_frame=trim_bounds(source_frames,start_frame,end_frame)
+    elif type(start_frame) is not int:raise ValueError('Trim markers must be integers.')
+    # Trim at 24fps without a look, then normalize geometry into a lossless cache.
+    # Look encoding is a separate pass; no trim filter ever shares its chain.
+    if base is not None and base.get('start_frame',0)==start_frame and base.get('end_frame',source_frames)==end_frame and base.get('lossless'):
+        lossless=Path(base['lossless'])
+    else:
+        lossless=directory/'normalized-trim.mkv'
+        trim=f'trim=start_frame={start_frame}'+(f':end_frame={end_frame}' if end_frame is not None else '')
+        filters=(f'setpts=PTS-STARTPTS,fps=24,{trim},setpts=PTS-STARTPTS,'
+                 f'scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,setsar=1')
+        output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-y','-i',str(source),'-map','0:v:0','-an',
+            '-vf',filters,'-c:v','ffv1','-threads','2','-fps_mode','passthrough','-progress','pipe:1','-nostats',str(lossless)],text=True)
+        count=int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
+        if source_frames is None:source_frames=count;end_frame=count
+        start_frame,end_frame=trim_bounds(source_frames,start_frame,end_frame)
+        if count!=end_frame-start_frame:raise ValueError('Trim did not retain the requested frame range.')
+    working=lossless
+    frames=end_frame-start_frame
+    if speed!=1:
+        # Trim first on the source grid, then retime the lossless trim. The
+        # 24fps resample yields the exact output budget used by audio/history.
+        frames=speed_frame_count(frames,speed)
+        working=directory/f'normalized-speed-{speed:g}.mkv'
+        output=subprocess.check_output(['ffmpeg','-v','error','-nostdin','-y','-i',str(lossless),'-an',
+            '-vf',f'setpts=(PTS-STARTPTS)/{speed:g},fps={FPS},setpts=PTS-STARTPTS',
+            '-c:v','ffv1','-threads','2','-fps_mode','passthrough','-progress','pipe:1','-nostats',str(working)],text=True)
+        count=int([line.split('=',1)[1] for line in output.splitlines() if line.startswith('frame=')][-1])
+        if count!=frames:raise ValueError('Speed did not retain the calculated frame count.')
+    normalized=directory/'clip.m4v'
+    # Use the complete existing normalization configuration after the separate
+    # trim and speed stages. Reject anything outside the strict I/P invariant.
+    run('ffmpeg','-v','error','-nostdin','-y','-i',working,'-an',
+        '-vf',f'{LOOKS[look]}pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
+        '-c:v','mpeg4','-threads','2','-q:v','4','-g','10000','-bf','0','-sc_threshold','0',
+        '-fps_mode','passthrough','-f','m4v',normalized)
+    _,packets=vops(normalized)
+    if len(packets)!=frames or [p[4]>>6 for p in packets]!=[0]+[1]*(len(packets)-1):
+        raise ValueError('Trim normalization must retain at least two frames with one initial I and subsequent P frames.')
+    full_audio=base.get('source_audio',base.get('audio')) if base is not None else prepare_audio(source,metadata,source_frames,directory,FPS)
+    audio=trim_audio(full_audio,start_frame,end_frame,directory/'trimmed-audio.wav',FPS) if start_frame or end_frame!=source_frames else full_audio
+    audio=speed_audio(audio,frames,directory/f'sped-audio-{speed:g}.wav',speed,FPS)
+    preview=directory/'preview.mp4'
+    run('ffmpeg','-v','error','-y','-r',FPS,'-i',normalized,*encoding_args(audio),
+        '-c:v','libx264','-threads','2','-crf','18','-pix_fmt','yuv420p','-movflags','+faststart',preview)
+    run('ffmpeg','-v','error','-y','-i',preview,'-frames:v','1',directory/'thumb.jpg')
+    return {'look':look,'speed':speed,'source_frames':source_frames,'start_frame':start_frame,'end_frame':end_frame,
+        'source':str(source),'normalized':str(normalized),'lossless':str(lossless),'preview':str(preview),
+        'audio':audio,'source_audio':full_audio,'frames':len(packets),'duration':len(packets)/FPS,'sha256':digest(Path(source))}
 
 
 def ending_mode(transition):
@@ -57,8 +128,10 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
         effect = transition.get('effect')
         duration = transition.get('duration')
         repeat = transition.get('repeat', 4)
+        validate_random_seed(transition.get('random_seed'))
         if effect not in ('cut', *EFFECTS):
             raise ValueError('Unsupported effect.')
+        audio_follow=validate_audio_follow(effect,transition.get('audio_follow',False))
         if effect != 'cut':
             validate_tempo(transition)
             ending_mode(transition)
@@ -76,12 +149,13 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
             header, packets = vops(Path(clip['normalized']))
             if i == 0 or transitions[i-1]['effect'] == 'cut':
                 if i:
-                    boundaries.append({'frame': expected, 'effect': 'cut', 'duration': 0})
+                    boundaries.append({'frame': expected, 'effect': 'cut', 'duration': 0, 'audio_follow': False})
                 target.write((header if i == 0 else b'')+b''.join(packets))
                 expected += len(packets)
             else:
                 transition = transitions[i-1]
                 count = round(transition['duration']*FPS)
+                follow = validate_audio_follow(transition['effect'],transition.get('audio_follow',False))
                 ending = ending_mode(transition)
                 indices, config = prediction_plan(len(packets), transition['effect'], count, transition.get('repeat', 4),
                                                  transition.get('motion_start', 0), transition.get('loop_frames'),
@@ -89,7 +163,8 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
                                                  transition.get('release_duration') if transition['effect'] in SMOOTH_EFFECTS and transition.get('smooth') else None, transition.get('tempo'))
                 tail = [packets[index] for index in indices]
                 boundaries.append({'frame': expected, 'effect': transition['effect'], 'duration': count/FPS,
-                                   'tempo': transition.get('tempo'),
+                                   'tempo': transition.get('tempo'), 'random_seed': transition.get('random_seed'),
+                                   'audio_follow': follow,
                                    'motion_start': config['motion_start'], 'parameters': config, 'ending': ending,
                                    'reset_frame': expected+count if ending == 'reset' and count+1 < len(packets) else None,
                                    'release_b_vop_indices': list(range(count+1, len(packets))) if ending == 'flow' else [],
@@ -115,6 +190,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
                 expected += len(packets)-1
             progress(f'Assembled clip {i+1}/{len(clips)}', .35*(i+1)/len(clips))
     assembled_frames = expected
+    audio_donors = [boundary.get('b_vop_indices') for boundary in boundaries]
     video_trim, audio_trim = [], []
     preview_info = None
     if preview_boundary is not None:
@@ -131,7 +207,7 @@ def render(clips, transitions, directory, progress=lambda stage, fraction: None,
         boundaries = [boundary]
     run('ffmpeg', '-v', 'error', '-xerror', '-r', FPS, '-i', stream, *video_trim, '-f', 'null', '-')
     progress('Assembling original audio', .36)
-    audio, audio_samples = assemble_audio(clips, transitions, directory, FPS) if include_audio else (None, 0)
+    audio, audio_samples = assemble_audio(clips, transitions, directory, FPS, donor_indices=audio_donors) if include_audio else (None, 0)
     if audio and audio_samples != assembled_frames*SAMPLE_RATE//FPS:
         raise RuntimeError('Audio and video timelines do not match.')
     if audio and preview_info is not None:

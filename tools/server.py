@@ -14,13 +14,51 @@ import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 import uuid
 
-from sequence import prepare, render
+from sequence import prepare, render, trim_bounds, speed_bounds, speed_frame_count
 from mosh import LOOKS
 import lan
 from editor_options import tempo_frames, preset_settings, validate_project_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_UPLOAD = 128*1024*1024
+
+
+def clip_json(clip):
+    full = clip.get('source_frames', clip['frames'])
+    start, end = clip.get('start_frame', 0), clip.get('end_frame', full)
+    speed = clip.get('speed', 1.0)
+    query = f'?look={clip.get("look", "original")}'
+    if start or end != full or speed != 1:
+        query += f'&start_frame={start}&end_frame={end}&speed={speed:g}'
+    return {k:(clip.get(k,1.0) if k=='speed' else clip[k]) for k in ('id','name','frames','duration','sha256','look','speed')} | {
+        'source_frames':full, 'start_frame':start, 'end_frame':end,
+        'preview':f'/media/clip/{clip["id"]}{query}', 'thumbnail':f'/media/thumb/{clip["id"]}{query}'}
+
+
+def timeline_speeds(body, clips):
+    speeds = body.get('speeds', [{} for _ in clips])
+    if not isinstance(speeds,list) or len(speeds)!=len(clips):
+        raise ValueError('One speed is needed per timeline clip.')
+    result=[]
+    for clip, value in zip(clips,speeds):
+        if isinstance(value,dict):value=value.get('speed')
+        if value is None:value=clip.get('speed',1.0)
+        result.append(speed_bounds(value))
+    return result
+
+
+def timeline_trims(body, clips):
+    trims = body.get('trims', [{} for _ in clips])
+    if not isinstance(trims,list) or len(trims)!=len(clips):
+        raise ValueError('One trim is needed per timeline clip.')
+    result=[]
+    for clip, markers in zip(clips,trims):
+        if not isinstance(markers,dict):raise ValueError('Invalid trim markers.')
+        full=clip.get('source_frames',clip['frames'])
+        start,end=markers.get('start_frame',0),markers.get('end_frame',full)
+        if type(start) is not int or type(end) is not int:raise ValueError('Trim markers must be integers.')
+        result.append(trim_bounds(full,start,end))
+    return result
 
 
 def processing_error(exc):
@@ -43,16 +81,22 @@ class App:
         self.busy = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=1)
 
-    def view_clip(self, clip, look):
-        if look not in LOOKS:raise ValueError('Unsupported clip look.')
-        key=(clip['id'],look)
+    def view_clip(self, clip, look, start_frame=0, end_frame=None, speed=1.0):
+        if not isinstance(look,str) or look not in LOOKS:raise ValueError('Unsupported clip look.')
+        full=clip.get('source_frames',clip['frames'])
+        start_frame,end_frame=trim_bounds(full,start_frame,end_frame)
+        speed=speed_bounds(speed)
+        key=(clip['id'],look) if start_frame==0 and end_frame==full and speed==1 else (clip['id'],look,start_frame,end_frame,speed)
         if key not in self.views:
-            if look==clip.get('look','original'):
+            if look=='original' and start_frame==0 and end_frame==full and speed==1 and clip.get('look','original')=='original':
                 self.views[key]=dict(clip)
             else:
-                variant=prepare(clip['source'],Path(clip['source']).parent/'looks'/look,look=look)
-                variant.update(id=clip['id'],name=clip['name'])
-                self.views[key]=variant
+                base=self.views.get((clip['id'],'original')) if speed==1 else None
+                if look!='original':base=self.view_clip(clip,'original',start_frame,end_frame,speed)
+                suffix=f'{look}-{start_frame}-{end_frame}'+('' if speed==1 else f'-speed-{speed:g}')
+                variant=prepare(clip['source'],Path(clip['source']).parent/'views'/suffix,
+                    look=look,start_frame=start_frame,end_frame=end_frame,base=base,speed=speed)
+                variant.update(id=clip['id'],name=clip['name']);self.views[key]=variant
         return dict(self.views[key])
 
     def work(self, job_id, clips, transitions, preview_boundary=None, include_audio=True):
@@ -97,11 +141,49 @@ def handler_for(app):
             origin = self.headers.get('Origin')
             return host in valid and (not origin or origin in {f'http://{h}' for h in valid})
 
+        def read_json(self, length, maximum):
+            if not 0<length<=maximum:raise ValueError('Invalid editor request size.')
+            if self._post_body is None:
+                body=json.loads(self.rfile.read(length))
+                if not isinstance(body,dict):raise ValueError('Expected a JSON object.')
+                self._post_body=body
+            return self._post_body
+
+        def validate_trims_before_processing(self, length):
+            # No cache preparation or busy lock here: invalid parameters are 400,
+            # even if a previous valid processing request is still completing.
+            if self.path=='/api/jobs':
+                body=self.read_json(length,16384)
+                ids=body.get('clips')
+                if not isinstance(ids,list) or not 1<=len(ids)<=12 or not all(isinstance(i,str) for i in ids):raise ValueError('Choose 1–12 timeline clips.')
+                with app.lock:clips=[app.clips[i] for i in ids]
+                trims=timeline_trims(body,clips)
+                speeds=timeline_speeds(body,clips)
+                validate_project_settings([speed_frame_count(end-start,speed) for (start,end),speed in zip(trims,speeds)],body.get('transitions'))
+            elif re.fullmatch(r'/api/clips/[a-f0-9]{32}/(look|trim|speed)',self.path):
+                body=self.read_json(length,1024);identifier=self.path.split('/')[3]
+                with app.lock:clip=app.clips[identifier]
+                start,end=timeline_trims({'trims':[body]},[clip])[0]
+                speed=timeline_speeds({'speeds':[body.get('speed',clip.get('speed',1.0))]},[clip])[0]
+                speed_frame_count(end-start,speed)
+            elif self.path=='/api/sequence/restore':
+                body=self.read_json(length,16384);ids=body.get('clips')
+                if not isinstance(ids,list) or len(ids)>12 or not all(isinstance(i,str) for i in ids):raise ValueError('Choose up to 12 timeline clips.')
+                with app.lock:library={**app.archived,**app.clips}
+                originals=[library[i] for i in ids]
+                trims=timeline_trims(body,originals);speeds=timeline_speeds(body,originals)
+                for (start,end),speed in zip(trims,speeds):speed_frame_count(end-start,speed)
+
         def do_POST(self):
             if not self.allowed():
                 return self.send_json(403, {'error': 'Local same-origin requests only.'})
             if not lan.authorized(self.headers, self.client_address, app.lan_key):
                 return self.send_json(401, {'error': 'Open the phone link from the Mac first.'})
+            self._post_body=None
+            try:
+                self.validate_trims_before_processing(int(self.headers.get('Content-Length',0)))
+            except (ValueError,KeyError,TypeError) as exc:
+                return self.send_json(400,{'error':str(exc)})
             if not app.busy.acquire(blocking=False):
                 return self.send_json(409, {'error': 'Processing is already running.'})
             owned = True
@@ -135,18 +217,22 @@ def handler_for(app):
                     except Exception:
                         shutil.rmtree(directory, ignore_errors=True)
                         raise
-                    return self.send_json(201, {k: clip[k] for k in ('id','name','frames','duration','sha256','look')} |
-                                          {'preview': f'/media/clip/{clip_id}?look=original', 'thumbnail': f'/media/thumb/{clip_id}?look=original'})
-                if re.fullmatch(r'/api/clips/[a-f0-9]{32}/look', self.path):
-                    if not 0<length<=1024:raise ValueError('Invalid clip look request.')
-                    body=json.loads(self.rfile.read(length));identifier=self.path.split('/')[3]
+                    return self.send_json(201, clip_json(clip))
+                if re.fullmatch(r'/api/clips/[a-f0-9]{32}/(look|trim|speed)', self.path):
+                    if not 0<length<=1024:raise ValueError('Invalid clip view request.')
+                    body=self.read_json(length,1024);identifier=self.path.split('/')[3]
                     if identifier not in app.clips:raise ValueError('Unknown clip.')
-                    clip=app.view_clip(app.clips[identifier],body.get('look'))
-                    with app.lock:app.clips[identifier]=clip
-                    return self.send_json(200,{k:clip[k] for k in ('id','name','frames','duration','sha256','look')} | {'preview':f'/media/clip/{identifier}?look={clip["look"]}', 'thumbnail':f'/media/thumb/{identifier}?look={clip["look"]}'})
+                    original=app.clips[identifier]
+                    start,end=timeline_trims({'trims':[body]},[original])[0]
+                    speed=timeline_speeds({'speeds':[body.get('speed',original.get('speed',1.0))]},[original])[0]
+                    look=body.get('look',original.get('look','original'))
+                    clip=app.view_clip(original,look,start,end,speed)
+                    if self.path.endswith('/look'):
+                        with app.lock:app.clips[identifier]=app.view_clip(original,look)
+                    return self.send_json(200,clip_json(clip))
                 if self.path in ('/api/settings','/api/sequence/restore'):
                     if not 0 < length <= 16384: raise ValueError('Invalid editor request.')
-                    body=json.loads(self.rfile.read(length))
+                    body=self.read_json(length,16384)
                     if self.path == '/api/settings':
                         if body.get('action')=='validate_project':
                             validate_project_settings(body['frames'],body['transitions'])
@@ -158,25 +244,29 @@ def handler_for(app):
                             return self.send_json(200,{'loop_frames':frames,'actual_seconds':frames/24,'target_seconds':60/body['bpm']*body['beats']})
                         raise ValueError('Unknown editor setting.')
                     ids=body['clips']
-                    if not isinstance(ids,list) or len(ids)>12 or len(ids)!=len(set(ids)) or not all(isinstance(i,str) for i in ids):
-                        raise ValueError('Choose up to 12 distinct clips.')
+                    if not isinstance(ids,list) or len(ids)>12 or not all(isinstance(i,str) for i in ids):
+                        raise ValueError('Choose up to 12 timeline clips.')
                     with app.lock:library={**app.archived,**app.clips}
                     if any(i not in library for i in ids):raise ValueError('This session no longer has the project media. Import the original videos.')
                     looks=body.get('looks',{})
-                    if not isinstance(looks,dict) or any(v not in LOOKS for v in looks.values()):raise ValueError('Invalid project clip looks.')
-                    restored={i:app.view_clip(library[i],looks.get(i,library[i].get('look','original'))) for i in ids}
+                    if isinstance(looks,dict):looks=[looks.get(i,library[i].get('look','original')) for i in ids]
+                    if not isinstance(looks,list) or len(looks)!=len(ids) or any(not isinstance(v,str) or v not in LOOKS for v in looks):raise ValueError('Invalid project clip looks.')
+                    originals=[library[i] for i in ids]
+                    trims=timeline_trims(body,originals);speeds=timeline_speeds(body,originals)
+                    views=[app.view_clip(clip,look,start,end,speed) for clip,look,(start,end),speed in zip(originals,looks,trims,speeds)]
+                    restored={i:app.view_clip(library[i],look) for i,look in zip(ids,looks)}
                     with app.lock:
                         app.clips=restored
                         app.archived={i:c for i,c in library.items() if i not in app.clips}
-                    return self.send_json(200,{'restored':ids})
+                    return self.send_json(200,{'restored':ids,'clips':[clip_json(c) for c in views]})
                 if self.path != '/api/jobs':
                     return self.send_json(404, {'error': 'Unknown endpoint.'})
                 if not 0 < length <= 16384:
                     raise ValueError('Invalid sequence request.')
-                body = json.loads(self.rfile.read(length))
+                body = self.read_json(length,16384)
                 ids, transitions = body['clips'], body['transitions']
-                if not isinstance(ids, list) or not 1 <= len(ids) <= 12 or len(ids) != len(set(ids)):
-                    raise ValueError('Choose 1–12 distinct clips.')
+                if not isinstance(ids, list) or not 1 <= len(ids) <= 12 or not all(isinstance(i,str) for i in ids):
+                    raise ValueError('Choose 1–12 timeline clips.')
                 if not isinstance(transitions, list) or len(transitions) != len(ids)-1 or not all(isinstance(t, dict) for t in transitions):
                     raise ValueError('One transition setting is needed per boundary.')
                 include_audio = body.get('audio', True)
@@ -185,7 +275,12 @@ def handler_for(app):
                 preview = body.get('preview_boundary')
                 if preview is not None and (type(preview) is not int or not 0 <= preview < len(transitions)):
                     raise ValueError('Choose a valid transition to preview.')
-                clips = [dict(app.clips[i]) for i in ids]
+                looks=body.get('looks')
+                if looks is not None and (not isinstance(looks,list) or len(looks)!=len(ids) or any(not isinstance(v,str) or v not in LOOKS for v in looks)):
+                    raise ValueError('One supported look is needed per timeline clip.')
+                originals=[app.clips[i] for i in ids]
+                trims=timeline_trims(body,originals);speeds=timeline_speeds(body,originals)
+                clips=[app.view_clip(c,looks[n] if looks is not None else c.get('look','original'),*trims[n],speeds[n]) for n,c in enumerate(originals)]
                 job_id = uuid.uuid4().hex
                 with app.lock:
                     app.jobs[job_id] = {'id': job_id, 'status': 'processing', 'stage': 'Preparing sequence', 'progress': 0}
@@ -245,13 +340,10 @@ def handler_for(app):
                 return self.send_json(200, {'phone_url': url})
             if path == '/api/library':
                 with app.lock:
-                    clips=[{k:c[k] for k in ('id','name','frames','duration','sha256','look')} | {'preview':f'/media/clip/{c["id"]}?look={c.get("look","original")}', 'thumbnail':f'/media/thumb/{c["id"]}?look={c.get("look","original")}'} for c in {**app.archived,**app.clips}.values()]
+                    clips=[clip_json(c) for c in {**app.archived,**app.clips}.values()]
                 return self.send_json(200,{'clips':clips})
             if path == '/api/clips':
-                with app.lock:
-                    clips = [{k:c[k] for k in ('id', 'name', 'frames', 'duration','sha256','look')} |
-                             {'preview': f'/media/clip/{c["id"]}?look={c.get("look","original")}', 'thumbnail': f'/media/thumb/{c["id"]}?look={c.get("look","original")}'}
-                             for c in app.clips.values()]
+                with app.lock:clips=[clip_json(c) for c in app.clips.values()]
                 return self.send_json(200, {'clips': clips})
             if path.startswith('/api/jobs/'):
                 with app.lock:
@@ -264,8 +356,15 @@ def handler_for(app):
                     kind, identifier = parts[2:]
                     if kind in ('clip', 'thumb') and identifier in {**app.archived,**app.clips}:
                         clip=({**app.archived,**app.clips})[identifier]
-                        look=parse_qs(parsed.query).get('look',[clip.get('look','original')])[0]
-                        view=app.views.get((identifier,look))
+                        query=parse_qs(parsed.query)
+                        look=query.get('look',[clip.get('look','original')])[0]
+                        full=clip.get('source_frames',clip['frames'])
+                        try:
+                            start,end=trim_bounds(full,int(query.get('start_frame',['0'])[0]),int(query.get('end_frame',[str(full)])[0]))
+                            speed=speed_bounds(float(query.get('speed',['1'])[0]))
+                        except (ValueError,TypeError):return self.send_json(400,{'error':'Invalid clip view markers.'})
+                        key=(identifier,look) if start==0 and end==full and speed==1 else (identifier,look,start,end,speed)
+                        view=app.views.get(key)
                         if view is None:return self.send_json(404,{'error':'Clip look is not prepared.'})
                         file = Path(view['preview'])
                         if kind == 'thumb':

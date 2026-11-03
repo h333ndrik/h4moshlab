@@ -26,7 +26,7 @@ Aktuelles Layout ausdrücklich beibehalten: Arial/Helvetica, dezenter hellgrauer
 
 Video-only: Bilder und Photo Mosh zurückgestellt. Originalton wurde integriert; Audio-Moshing wurde nur theoretisch besprochen, ist nicht implementiert. Langfristig mobile Website über Internet ohne Mac; kurzfristig gleiches WLAN mit laufendem Mac. Keine native App/App Store aktuell.
 
-Für spätere Designarbeit merken: H4-Mauscursor, Ruhelage -15 Grad, über aktiviertem anklickbarem Element +15 Grad. Nutzer proaktiv bei nächster Designphase daran erinnern. Asset fehlt; noch nicht implementieren. Touchgeräte haben keinen entsprechenden Mauszeiger.
+Für spätere Designarbeit merken: H4-Mauscursor, Upright at all times (0deg). Hover over an enabled clickable element scales it to 112% (150ms ease-out). A mouse press applies a subtle scale dip; releasing restores it. The scale change signals clickability. Nutzer proaktiv bei nächster Designphase daran erinnern. Asset fehlt; noch nicht implementieren. Touchgeräte haben keinen entsprechenden Mauszeiger.
 
 ## Architektur und tatsächlich funktionierender Stand
 
@@ -103,15 +103,15 @@ Frühere Nutzerdateien: IMG_3194.MOV, IMG_1993.MOV, Supermosh_2026-10-26T01-01-5
 
 ## Update nach dieser Übergabe
 
-Effektarbeit wurde priorisiert. Loop Release ist inzwischen als neuer MPEG-4-P-Frame-Scheduling-Modus in Engine und Dialog integriert; siehe LOOP_RELEASE.md und tools/compare_release.py. 26 Integrationstests bestanden. Kein kontinuierliches Ausblenden der Verzerrung: frühere Blockwechsel bleiben möglich. Cursor-Asset wurde im Workspace nicht gefunden, anderer h4ngelic-Chat ist nicht zugänglich. Schwarz-Weiß/kleiner/sanfte Rotation bleiben vorgemerkt. Mobile-Änderungen weiterhin uncommittet und ohne physischen iPhone-Nachweis. Git-Status prüfen.
+Effektarbeit wurde priorisiert. Loop Release ist inzwischen als neuer MPEG-4-P-Frame-Scheduling-Modus in Engine und Dialog integriert; siehe LOOP_RELEASE.md und tools/compare_release.py. 26 Integrationstests bestanden. Kein kontinuierliches Ausblenden der Verzerrung: frühere Blockwechsel bleiben möglich. Cursor-Asset wurde im Workspace nicht gefunden, anderer h4ngelic-Chat ist nicht zugänglich. Schwarz-Weiß/kleiner/aufrechte Skalierung bleiben vorgemerkt. Mobile-Änderungen weiterhin uncommittet und ohne physischen iPhone-Nachweis. Git-Status prüfen.
 
 ## Cursor umgesetzt
 
-Original-H4-SVG aus hochgeladener h4ngelic-preview (5).html extrahiert. web/h4-cursor.svg, web/cursor.js, CSS und feste Serverrouten implementiert: 22x33px, schwarz/weiße Kontur, -15/+15 Grad mit 180ms ease-out. Touch/Video/native Fallback, reduzierte Bewegung, Modal und deaktivierte Controls berücksichtigt. tests/browser_cursor.py ist erfolgreich gelaufen; Screenshot work/h4-cursor.png visuell geprüft. Frühere Aussagen zum fehlenden Asset sind überholt.
+Original-H4-SVG aus hochgeladener h4ngelic-preview (5).html extrahiert. web/h4-cursor.svg, web/cursor.js, CSS und feste Serverrouten implementiert: 22x33px, schwarz/weiße Kontur, Upright at all times (0deg). Hover over an enabled clickable element scales it to 112% (150ms ease-out). A mouse press applies a subtle scale dip; releasing restores it. The scale change signals clickability. Touch/Video/native Fallback, reduzierte Bewegung, Modal und deaktivierte Controls berücksichtigt. tests/browser_cursor.py ist erfolgreich gelaufen; Screenshot work/h4-cursor.png visuell geprüft. Frühere Aussagen zum fehlenden Asset sind überholt.
 
-## Aktuelle Cursorwinkel (ersetzt vorherige Angaben)
+## Aktuelles Cursorverhalten (ersetzt vorherige Angaben)
 
-Nutzerkorrektur: Ruhelage -25 Grad, über aktivierter Klickmöglichkeit 0 Grad. Weiche Rotation und Größe unverändert.
+Upright at all times (0deg). Hover over an enabled clickable element scales it to 112% (150ms ease-out). A mouse press applies a subtle scale dip; releasing restores it. The scale change signals clickability. Größe unverändert.
 
 ## Neue Videoeffekte
 
@@ -132,7 +132,7 @@ Nutzer hat ausdrücklich dunkle/negative Designvariante gewünscht: schwarzer Hi
 ## Aktuell wieder hell
 
 Nutzer hat das dunkle Experiment zurückgenommen. web/style.css auf helle Version
-aus379fb37 zurückgestellt. Effekte, Cursor(-25/0), Favicon und Layout unverändert.
+aus379fb37 zurückgestellt. Effekte, Cursor (upright hover/click scaling), Favicon und Layout unverändert.
 
 ## Aktueller Abschluss: Reset Pulse und einfache Übergangskontrolle
 
@@ -171,7 +171,7 @@ trimmt samplegenau, -t statt -frames:v für muxierten Previewexport, setpts auf
 N/(24*TB) plus explizite Ausgabe24fps für Preview/Reset Pulse. Finaler Testlauf
 prüft jetzt auch Videodauer passend zur Framezahl. Private Medien bleiben lokal.
 Öffentliche Screenshotreferenz demo/editor/reset-pulse.png enthält nur synthetische
-Samples. Helles Design, Cursor(-25/0), h4-Favicon und Tabtitel mosh lab erhalten.
+Samples. Helles Design, Cursor (upright hover/click scaling), h4-Favicon und Tabtitel mosh lab erhalten.
 
 ## Permanent snapshot: h4 moshlab blueprint 1
 

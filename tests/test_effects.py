@@ -121,6 +121,43 @@ class EngineRegression(unittest.TestCase):
         with self.assertRaises(ValueError):
             prediction_plan(3, 'motion-loop', 2)
 
+    def test_fifty_seeded_randomizations_per_effect_pass_prediction_plan(self):
+        script="""
+const {randomizeTransition}=require('./web/editor-tools.js');
+const effects=['classic-mosh','reset-pulse','frame-melt','progressive-melt','motion-stutter','motion-loop','loop-release'];
+const cases=[];
+for(const frames of [37,96])for(const effect of effects)for(let i=0;i<50;i++){
+  const seed=i.toString(16).padStart(16,'0');
+  const current={effect,duration:frames===37?0.5:1.5,motion_start:frames===37?0:0.25,repeat:4,loop_frames:12,smooth:false,ending:'flow',release_duration:.25,preset:1,tempo:{bpm:120,beats:1}};
+  cases.push({frames,seed,config:randomizeTransition(effect,frames,current,seed)});
+}
+process.stdout.write(JSON.stringify(cases));
+"""
+        cases=json.loads(subprocess.check_output(['node','-e',script],cwd=ROOT,text=True))
+        self.assertEqual(len(cases),700)
+        aligned={'loop-release','progressive-melt','motion-stutter','reset-pulse'}
+        smooth_effects={'frame-melt','progressive-melt','motion-stutter'}
+        repeat_effects={'frame-melt','progressive-melt','reset-pulse'}
+        loop_effects={'motion-loop','loop-release','motion-stutter','reset-pulse'}
+        seen={effect:0 for effect in ('classic-mosh','reset-pulse','frame-melt','progressive-melt','motion-stutter','motion-loop','loop-release')}
+        for entry in cases:
+            frames,seed,config=entry['frames'],entry['seed'],entry['config'];effect=config['effect'];count=round(config['duration']*24)
+            seen[effect]+=1
+            self.assertEqual(config['random_seed'],seed);self.assertNotIn('preset',config);self.assertNotIn('tempo',config)
+            self.assertIn(config['ending'],('flow','reset'))
+            self.assertTrue(2<=config['repeat']<=12)
+            self.assertTrue(2<=config['loop_frames']<=48)
+            if effect in aligned:self.assertEqual(config['motion_start'],0);self.assertGreaterEqual(count,12)
+            if effect in repeat_effects:self.assertTrue(2<=config['repeat']<=12)
+            if effect in loop_effects:
+                minimum=4 if effect in ('motion-stutter','reset-pulse') else 2
+                self.assertTrue(minimum<=config['loop_frames']<count)
+                self.assertLessEqual(config['loop_frames'],frames-1-round(config['motion_start']*24))
+            if effect not in smooth_effects:self.assertFalse(config['smooth'])
+            smooth=effect in smooth_effects and config['smooth']
+            prediction_plan(frames,effect,count,config['repeat'],config['motion_start'],config['loop_frames'],smooth,config.get('release_duration') if smooth else None,None)
+        self.assertTrue(all(value==100 for value in seen.values()),seen)
+
     def test_original_files_preserved(self):
         self.assertEqual([digest(self.a), digest(self.b)], self.hashes)
 

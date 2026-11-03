@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,11 +25,24 @@ with sync_playwright() as p:
     original=page.locator('.clip-select span').all_text_contents()
     page.locator('.clip').first.locator('.clip-controls button').nth(1).click()
     page.locator('#undo').click();expect(page.locator('.clip-select span').first).to_have_text(original[0])
-    page.locator('.connector').click();page.locator('#effect').select_option('reset-pulse');page.locator('#preset').select_option('1')
+    page.locator('.connector').click();page.locator('#effect').select_option('reset-pulse');expect(page.locator('#audio-follow-control')).to_be_visible();page.locator('#audio-follow').select_option('follow');page.locator('#preset').select_option('1')
     expect(page.locator('#preset')).to_have_value('1');expect(page.locator('#apply-tempo')).to_be_enabled()
     expect(page.locator('#repeat-value')).to_have_text('4×')
     page.locator('#tempo-control summary').click();page.locator('#bpm').fill('137');page.locator('#apply-tempo').click()
     expect(page.locator('#tempo-note')).to_contain_text('137 BPM');expect(page.locator('#loop-value')).to_have_text('0.46 s')
+    before_randomize=page.evaluate('({...setting(0)})');assert not before_randomize.get('random_seed')
+    expect(page.locator('#randomize-transition')).to_be_enabled();page.locator('#randomize-transition').click()
+    expect(page.locator('#preset')).to_have_value('custom');expect(page.locator('#randomize-note')).to_contain_text('Seed ')
+    randomized=page.evaluate('({...setting(0)})')
+    assert re.fullmatch(r'[a-f0-9]{16}',randomized['random_seed']);assert 'preset' not in randomized;assert 'tempo' not in randomized;assert randomized['audio_follow'] is True
+    assert randomized['ending'] in ('flow','reset');assert 2<=randomized['repeat']<=12;assert 2<=randomized['loop_frames']<=48
+    page.keyboard.press('Escape');page.locator('#project-menu summary').click()
+    with page.expect_download() as download:page.locator('#save-project').click()
+    randomized_project=artifacts/'randomized.h4mosh';download.value.save_as(randomized_project);saved_random=json.loads(randomized_project.read_text())
+    assert saved_random['transitions'][0]['random_seed']==randomized['random_seed'];assert saved_random['transitions'][0]['audio_follow'] is True;assert 'preset' not in saved_random['transitions'][0];assert 'tempo' not in saved_random['transitions'][0]
+    page.locator('#undo').click();expect(page.locator('#status')).to_have_text('Undone.')
+    page.wait_for_function('()=>!setting(0).random_seed&&setting(0).tempo?.bpm===137&&setting(0).audio_follow===true',timeout=120000)
+    page.locator('.connector').click();expect(page.locator('#preset')).to_have_value('custom');expect(page.locator('#tempo-note')).to_contain_text('137 BPM');expect(page.locator('#audio-follow')).to_have_value('follow');page.keyboard.press('Escape')
     page.keyboard.press('Escape');page.locator('#undo').click();page.locator('.connector').click()
     expect(page.locator('#loop-value')).to_have_text('0.50 s');page.keyboard.press('Escape');page.locator('#redo').click()
     page.locator('.connector').click();expect(page.locator('#tempo-note')).to_contain_text('137 BPM')
@@ -37,16 +51,31 @@ with sync_playwright() as p:
     expect(page.locator('#repeat-value')).to_have_text('8×');page.keyboard.press('Escape');page.locator('#undo').click()
     page.locator('.connector').click();expect(page.locator('#repeat-value')).to_have_text('4×');page.keyboard.press('Escape')
     page.locator('#sound').uncheck();page.locator('#undo').click();expect(page.locator('#sound')).to_be_checked()
-    page.locator('.clip-controls').last.locator('button').last.click();expect(page.locator('#count')).to_have_text('1 clip')
+    page.locator('.clip').last.get_by_role('button',name=re.compile('^Remove ')).click();expect(page.locator('#count')).to_have_text('1 clip')
     page.locator('#undo').click();expect(page.locator('#count')).to_have_text('2 clips')
     page.locator('.clip-look').first.select_option('negative-color');expect(page.locator('#status')).to_contain_text('Clip look ready',timeout=120000)
     page.locator('#undo').click();expect(page.locator('.clip-look').first).to_have_value('original')
     page.locator('#redo').click();expect(page.locator('.clip-look').first).to_have_value('negative-color')
+    original_frames=page.evaluate('state.clips[0].frames')
+    page.locator('.clip').first.get_by_role('button',name=re.compile('^Speed ')).click()
+    expect(page.locator('#speed-dialog')).to_be_visible();page.locator('#speed-range').fill('20')
+    expect(page.locator('#speed-value')).to_have_text('2.0×');page.locator('#speed-apply').click()
+    expect(page.locator('#speed-dialog')).not_to_be_visible(timeout=120000)
+    fast_frames=original_frames//2
+    assert page.evaluate('state.clips[0].speed')==2;assert page.evaluate('state.clips[0].frames')==fast_frames
+    page.locator('#undo').click();expect(page.locator('#status')).to_have_text('Undone.')
+    page.wait_for_function('(frames)=>state.clips[0].speed===1&&state.clips[0].frames===frames',arg=original_frames,timeout=120000)
+    page.locator('#redo').click();expect(page.locator('#status')).to_have_text('Redone.')
+    page.wait_for_function('(frames)=>state.clips[0].speed===2&&state.clips[0].frames===frames',arg=fast_frames,timeout=120000)
+    page.locator('.clip-look').first.select_option('black-white');expect(page.locator('#status')).to_contain_text('Clip look ready',timeout=120000)
+    assert page.evaluate('state.clips[0].speed')==2;assert page.evaluate('state.clips[0].frames')==fast_frames
+    page.locator('.clip-look').first.select_option('negative-color');expect(page.locator('#status')).to_contain_text('Clip look ready',timeout=120000)
+    assert page.evaluate('state.clips[0].speed')==2;assert page.evaluate('state.clips[0].frames')==fast_frames
     # Project is a lightweight settings file, with hashes and clip looks.
     page.locator('#project-menu summary').click()
     with page.expect_download() as download:page.locator('#save-project').click()
     project=artifacts/'saved.h4mosh';download.value.save_as(project);saved=json.loads(project.read_text())
-    assert saved['clips'][0]['look']=='negative-color';assert saved['transitions'][0]['tempo']['bpm']==137
+    assert saved['clips'][0]['look']=='negative-color';assert saved['clips'][0]['speed']==2;assert saved['clips'][0]['frames']==fast_frames;assert saved['transitions'][0]['tempo']['bpm']==137;assert saved['transitions'][0]['audio_follow'] is True
     assert saved['transitions'][0]['loop_frames']==11
     assert len(project.read_bytes())<16384
     page.locator('#assemble').click();expect(page.locator('#status')).to_contain_text('verified full decode',timeout=120000)
@@ -67,7 +96,7 @@ with sync_playwright() as p:
             target=Path(directory)/f'renamed-{i}.mp4';shutil.copyfile(file,target);originals.append(str(target))
         other.locator('#relink-files').set_input_files(originals)
         expect(other.locator('#project-dialog')).not_to_be_visible(timeout=120000)
-    expect(other.locator('#count')).to_have_text('2 clips');expect(other.locator('.clip-look').first).to_have_value('negative-color')
+    expect(other.locator('#count')).to_have_text('2 clips');expect(other.locator('.clip-look').first).to_have_value('negative-color');assert other.evaluate('state.clips[0].speed')==2;assert other.evaluate('state.clips[0].frames')==fast_frames;assert other.evaluate('setting(0).audio_follow') is True
     other.locator('.connector').click();expect(other.locator('#tempo-note')).to_contain_text('137 BPM');expect(other.locator('#repeat-value')).to_have_text('4×')
     other.keyboard.press('Escape');other.locator('#undo').click();expect(other.locator('#count')).to_have_text('0 clips')
     other.locator('#redo').click();expect(other.locator('#count')).to_have_text('2 clips')
@@ -77,4 +106,4 @@ with sync_playwright() as p:
     page.screenshot(path=str(artifacts/'desktop.png'),full_page=True)
     assert not errors,errors
     browser.close()
-print('PASS: imports/removals/reorder/slider/sound/look undo-redo, presets, BPM, real export, project hash relink after restart and narrow layout')
+print('PASS: imports/removals/reorder/slider/sound/look/speed undo-redo, presets, seeded randomize, audio-follow project/undo, BPM, real export, project hash relink after restart and narrow layout')

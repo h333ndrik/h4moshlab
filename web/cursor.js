@@ -39,6 +39,9 @@
   }, {passive:true});
   document.addEventListener('pointerout', event => { if (!event.relatedTarget) { position = null; hide(); } });
   document.addEventListener('pointerdown', event => { if (event.pointerType !== 'mouse') hide(); }, {passive:true});
+  document.addEventListener('pointerdown', event => { if (event.pointerType === 'mouse') cursor.classList.add('is-clicking'); }, {passive:true});
+  document.addEventListener('pointerup', () => cursor.classList.remove('is-clicking'), {passive:true});
+  document.addEventListener('pointercancel', () => cursor.classList.remove('is-clicking'), {passive:true});
   document.addEventListener('dragstart', () => { position = null; hide(); });
   document.addEventListener('scroll', update, {capture:true, passive:true});
   window.addEventListener('blur', () => { position = null; hide(); });
