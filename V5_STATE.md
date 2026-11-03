@@ -1,10 +1,24 @@
 # V5.3 State
 
-Letzter Stand: 2026-11-03 01:03 CET
-Abgeschlossen: V5.3 Blocks 1–8; Tests: 58 OK.
+Letzter Stand: 2026-11-03 04:44 CET
+Status: V5.3 merged into editor-workflow; awaiting user review.
+Abgeschlossen: V5.3 Blocks 1–8; Tests: 58 OK after merge.
 In Arbeit: Keine.
-Als nächstes: User review of the completed V5.3 branch.
-Letzte Testausgabe (Kurzfassung): Ran 58 tests in 87.134s — OK; Chromium-Smoke und erweiterter Editor-Workflow PASS, keine JavaScript-Fehler.
+Als nächstes: User review.
+Letzte Testausgabe (Kurzfassung): Ran 58 tests in 83.573s — OK; Chromium-Smoke PASS, keine JavaScript-Fehler.
+
+## V5.3 merged into editor-workflow
+
+- `v5-plan` was merged with `--no-ff` into `editor-workflow` as merge commit
+  `dd145283b4b93d75d62d3fd62ba8990a49e94290`.
+- Post-merge verification: `Ran 58 tests in 83.573s — OK`.
+- Python compilation, JavaScript syntax checks and the Chromium browser smoke
+  all passed. Smoke result: duration `5.916667s`, `javascript_errors: []`,
+  `comparison_preview_cache_settings_undo_labels: passed`.
+- `origin/main` and `h4-moshlab-blueprint-1` remain untouched. No squash or
+  force-push was used.
+
+state: V5.3 merged into editor-workflow; awaiting user review.
 
 ## Block 8 done — comparison preview, labels, V5.3 completion
 
